@@ -105,4 +105,4 @@ D:\Projects\ProjectButler\
 - [ ] Кнопки открытия работают на Windows
 
 ## 8. Текущий статус
-- 2026-09-13: создана папка, написан PLAN.md. Следующее: scaffold сканера (День 1).
+- 2026-09-13: создана папка, написан PLAN.md, git init, приватный репо https://github.com/fen3211/ProjectButler засинхронен (ветка main). Следующее: scaffold сканера (День 1).
