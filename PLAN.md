@@ -86,9 +86,9 @@ D:\Projects\ProjectButler\
 ## 6. План по шагам
 ### День 1 — сканер + база
 - [x] Папка + PLAN.md + git init
-- [ ] `butler/scanner.py` + `detectors/*`
-- [ ] `butler/store.py` (sqlite)
-- [ ] `python -m butler scan` работает на реальных папках
+- [x] `butler/scanner.py` + `detectors/*` (python/node/docker/git/csharp/go/js + поиск вглубь до 3 уровней)
+- [x] `butler/store.py` (sqlite `~/.project-butler/butler.db`)
+- [x] `python -m butler scan` работает на реальных папках (7/8 стеков верно, WebPortfolio пуст — честный unknown)
 ### День 2 — health + UI
 - [ ] `health.py` + `todos.py`
 - [ ] минимальный `ui/index.html`: список, карточка, поиск
@@ -106,3 +106,4 @@ D:\Projects\ProjectButler\
 
 ## 8. Текущий статус
 - 2026-09-13: создана папка, написан PLAN.md, git init, приватный репо https://github.com/fen3211/ProjectButler засинхронен (ветка main). Следующее: scaffold сканера (День 1).
+- 2026-09-14: День 1 готов — сканер + 7 детекторов + sqlite + CLI scan/list, проверка на D:\Projects (7/8 верно). Следующее: День 2 (health.py + todos.py + UI).
