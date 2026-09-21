@@ -6,6 +6,8 @@ import os
 import time
 
 from . import health as H
+from .dupes import find_dupes
+from .disk import human_bytes
 
 FEED_VERSION = 2
 
@@ -68,9 +70,12 @@ def _readme_tagline(rec) -> str:
             try:
                 with open(path, "r", encoding="utf-8", errors="ignore") as fh:
                     for line in fh:
-                        line = line.strip().lstrip("#").strip()
-                        if line and not line.startswith((">", "`", "!", "[", "|", "=", "-", "*")):
-                            return line[:160]
+                        stripped = line.strip()
+                        if not stripped or stripped.startswith(("#", "```", "---", "===", "***")):
+                            continue                          # заголовки/разделители — не описание
+                        text = stripped.lstrip("#").strip()
+                        if text and not text.startswith((">", "`", "!", "[", "|", "=", "-", "*")):
+                            return text[:160]
             except OSError:
                 continue
     return ""
@@ -90,6 +95,7 @@ def node(rec, root) -> dict:
     except ValueError:
         rel = _val(rec, "name", "")
     status = health.get("status", "unknown")
+    disk = facts.get("disk") or {}
     return {
         "id": slug(_val(rec, "name", "")),
         "name": _val(rec, "name", ""),
@@ -106,6 +112,11 @@ def node(rec, root) -> dict:
         "bonuses": health.get("bonuses", []),
         "todos": _val(rec, "todo_count", 0) or 0,
         "size_top": _val(rec, "size_top", 0) or 0,
+        "junk_bytes": disk.get("junk", 0),
+        "total_bytes": disk.get("total", 0),
+        "junk_parts": disk.get("parts", []),
+        "secrets": facts.get("secret_count", 0) or 0,
+        "env_leak_risk": bool(facts.get("env_leak_risk")),
         "has_readme": bool(_val(rec, "has_readme", False)),
         "has_git": "git" in stacks,
         "branch": facts.get("branch", "-"),
@@ -118,16 +129,22 @@ def node(rec, root) -> dict:
 
 def summarize(nodes) -> dict:
     by_status, by_stack, todos, score_sum = {}, {}, 0, 0
+    junk_total = 0
+    secrets_total = 0
     for n in nodes:
         by_status[n["status"]] = by_status.get(n["status"], 0) + 1
         by_stack[n["stack"]] = by_stack.get(n["stack"], 0) + 1
         todos += n["todos"]
         score_sum += n["score"]
+        junk_total += n.get("junk_bytes", 0)
+        secrets_total += n.get("secrets", 0)
     count = len(nodes)
     return {
         "projects": count,
         "avg_score": round(score_sum / count, 1) if count else 0,
         "todos": todos,
+        "junk_bytes": junk_total,
+        "secrets": secrets_total,
         "by_status": dict(sorted(by_status.items(), key=lambda kv: -kv[1])),
         "by_stack": dict(sorted(by_stack.items(), key=lambda kv: -kv[1])),
         "dead": sorted(n["name"] for n in nodes if n["status"] in ("broken", "abandoned", "unknown")),
@@ -138,12 +155,18 @@ def summarize(nodes) -> dict:
 def build_feed(root, records) -> dict:
     """Собирает фид. records — записи store.list_projects или объекты Project."""
     nodes = [node(r, root) for r in records]
+    enriched = []
+    for i, rec in enumerate(records):
+        item = dict(rec) if isinstance(rec, dict) else rec.to_dict()
+        item["tagline"] = nodes[i]["tagline"]           # теглайн нужен дедупу, а живёт он тут
+        enriched.append(item)
     return {
         "feed_version": FEED_VERSION,
         "generated_at": time.time(),
         "generated_at_iso": time.strftime("%Y-%m-%d %H:%M:%S"),
         "root": root,
         "clusters": {k: list(v) for k, v in CLUSTERS.items()},
+        "links": find_dupes(enriched),
         "totals": summarize(nodes),
         "projects": sorted(nodes, key=lambda n: (-n["score"], n["name"])),
     }
@@ -163,6 +186,36 @@ def read_feed(path):
             return json.load(fh)
     except (OSError, ValueError):
         return None
+
+
+def markdown_report(feed, records=None) -> str:
+    """Markdown-отчёт «состояние проектов на дату» — для резюме, портфолио и самобичевания."""
+    totals = feed["totals"]
+    lines = [
+        f"# Project Butler — отчёт ({feed['generated_at_iso']})",
+        "",
+        f"Корень: `{feed['root']}`",
+        f"Проектов: {totals['projects']} · средний score: {totals['avg_score']} · "
+        f"TODO: {totals['todos']} · мусор: {human_bytes(totals.get('junk_bytes', 0))}",
+        "",
+        "| Проект | Стек | Score | Статус | Простой | TODO | Мусор | Комментарий |",
+        "|---|---|---|---|---|---|---|---|",
+    ]
+    for n in feed["projects"]:
+        lines.append(
+            "| {name} | {stack} | {score} | {label} | {idle}д | {todos} | {junk} | {why} |".format(
+                name=n["name"].replace("|", "\\|"), stack=n["stack"], score=n["score"],
+                label=n["status_label"], idle=n["idle_days"], todos=n["todos"],
+                junk=human_bytes(n.get("junk_bytes", 0)),
+                why=(n["why"][0] if n["why"] else "").replace("|", "\\|")))
+    if feed.get("links"):
+        lines += ["", "## Похожие проекты (возможные дубли)", ""]
+        for link in feed["links"]:
+            lines.append(f"- **{link['a']}** ≈ **{link['b']}** — схожесть {link['score']}")
+    if totals.get("secrets"):
+        lines += ["", "> ⚠️ Найдено секретов: "
+                  f"{totals['secrets']} — прогони `python -m butler secrets` и перекинь ключи."]
+    return "\n".join(lines) + "\n"
 
 
 def format_report(records) -> str:

@@ -15,7 +15,14 @@ def detect(path, entries):
         return facts
     facts["pkg_name"] = pkg.get("name", "?")
     deps = pkg.get("dependencies")
-    facts["deps_count"] = len(deps) if isinstance(deps, dict) else 0
+    if isinstance(deps, dict):
+        facts["deps"] = sorted(deps.keys())            # имена — для поиска дублей и детектора пакетов
+        facts["deps_count"] = len(deps)
+    else:
+        facts["deps_count"] = 0
+    dev = pkg.get("devDependencies")
+    if isinstance(dev, dict):
+        facts["deps"] = sorted(set(facts.get("deps", [])) | {f"dev:{k}" for k in dev})
     scripts = pkg.get("scripts")
     facts["scripts"] = sorted(scripts.keys()) if isinstance(scripts, dict) else []
     dirs = {e.name for e in entries if e.is_dir()}

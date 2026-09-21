@@ -5,6 +5,7 @@ from datetime import datetime
 from pathlib import Path
 
 from .detectors import detect_all
+from .disk import project_disk
 from .health import evaluate
 from .source_scan import project_facts, scan_sources
 
@@ -228,8 +229,21 @@ def scan(root) -> list:
         }
         facts.setdefault("test_files", sources["test_files"])
         facts.setdefault("todos", sources["todos"][:120])
+        facts.setdefault("secrets", sources["secrets"])
+        facts.setdefault("secret_count", sources["secret_count"])
+        facts["disk"] = project_disk(child)
         if sources["env_usage"]:
             facts.setdefault("env_usage", sources["env_usage"])
+
+        # .env лежит рядом, а .gitignore его не упоминает — риск закоммитить секреты
+        if ".env" in names_lower and ".gitignore" in names_lower:
+            try:
+                gi = (child / ".gitignore").read_text(encoding="utf-8", errors="ignore")
+                facts["env_leak_risk"] = ".env" not in gi
+            except OSError:
+                facts["env_leak_risk"] = True
+        elif ".env" in names_lower and "git" in stacks:
+            facts["env_leak_risk"] = True                   # git есть, .gitignore нет вообще
 
         activity = max(mtime, sources["newest_mtime"], _git_activity(child))
         record = {

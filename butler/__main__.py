@@ -4,8 +4,10 @@ import sys
 from pathlib import Path
 
 from . import config
+from . import store
+from .disk import human_bytes
 from .health import evaluate, primary_stack
-from .index import build_feed, format_report, summarize, write_feed, node as galaxy_node
+from .index import build_feed, format_report, markdown_report, summarize, write_feed, node as galaxy_node
 from .scanner import scan
 from .store import DB_PATH, list_projects, norm_root, save_projects
 from .todos import format_todos
@@ -96,6 +98,11 @@ def cmd_export(args):
     root = _require(_root(args))
     records = list_projects(root) if args.no_scan else _rescan(root)
     feed = build_feed(root, records)
+    if args.md:
+        out = Path(args.md)
+        out.write_text(markdown_report(feed, records), encoding="utf-8")
+        print(f"отчёт: {out}")
+        return 0
     out = Path(args.out) if args.out else config.FEED_PATH
     out.parent.mkdir(parents=True, exist_ok=True)
     write_feed(out, feed)
@@ -117,6 +124,135 @@ def cmd_ui(args):
 def cmd_mcp(args):
     from . import mcp_server
     return mcp_server.main(root=args.root)
+
+
+def cmd_dupes(args):
+    from .dupes import find_dupes
+    root = _root(args)
+    records = list_projects(root) or _rescan(root)
+    enriched = []
+    for rec in records:
+        item = dict(rec)
+        item["tagline"] = galaxy_node(rec, root)["tagline"]
+        enriched.append(item)
+    links = find_dupes(enriched)
+    if not links:
+        print("Дублей не найдено — подозрительно чисто.")
+        return 0
+    for link in links:
+        print(f"{link['a']}  ≈  {link['b']}   (схожесть {link['score']})")
+        print(f"    общее: {', '.join(link['shared'][:8])}")
+    return 0
+
+
+def cmd_secrets(args):
+    root = _root(args)
+    records = list_projects(root) or _rescan(root)
+    total = 0
+    for rec in records:
+        facts = rec.get("facts") or {}
+        found = facts.get("secrets") or []
+        if facts.get("env_leak_risk"):
+            print(f"[env-leak-risk] {rec['name']} :: .env не в .gitignore")
+            total += 1
+        for item in found:
+            where = f"{item['file']}:{item['line']}"
+            print(f"[{item['kind']}] {rec['name']} :: {where} — {item['preview']}")
+            total += 1
+    print(f"\nнайдено секретов: {total}" if total else "Секретов не найдено. Впечатляет.")
+    return 0 if total == 0 else 1
+
+
+def cmd_disk(args):
+    from .disk import human_bytes
+    root = _root(args)
+    records = list_projects(root) or _rescan(root)
+    rows = []
+    junk_total = 0
+    for rec in records:
+        disk = (rec.get("facts") or {}).get("disk") or {}
+        junk_total += disk.get("junk", 0)
+        rows.append((rec["name"], disk.get("total", 0), disk.get("junk", 0),
+                     disk.get("parts", [])))
+    rows.sort(key=lambda r: -r[2])
+    print(f"мусора всего: {human_bytes(junk_total)}\n")
+    for name, total, junk, parts in rows:
+        top = ", ".join(f"{p['name']} {human_bytes(p['bytes'])}" for p in parts[:3])
+        print(f"{name:<22} всего {human_bytes(total):>10}  мусор {human_bytes(junk):>10}"
+              + (f"  ({top})" if top else ""))
+    return 0
+
+
+def cmd_doctor(args):
+    from .doctor import diagnose, format_report as doctor_report
+    root = _root(args)
+    records = list_projects(root) or _rescan(root)
+    targets = records
+    if args.name:
+        rec = store.get_project(args.name, root)
+        if not rec:
+            raise SystemExit(f"проект не найден: {args.name}")
+        targets = [rec]
+    for rec in targets:
+        print(doctor_report(rec, diagnose(rec)))
+        print()
+    return 0
+
+
+def cmd_diff(args):
+    root = _root(args)
+    diff = store.diff_scans(root)
+    if diff["scans"] < 2:
+        print("Нужно минимум два скана, чтобы было что сравнивать.")
+        return 0
+    print(f"диф по {root}:")
+    if diff["added"]:
+        print("  новые:  " + ", ".join(diff["added"]))
+    if diff["removed"]:
+        print("  ушли:   " + ", ".join(diff["removed"]))
+    for item in diff["improved"]:
+        print(f"  ▲ {item['name']}: {item['from']} → {item['to']} (+{item['delta']})")
+    for item in diff["worsened"]:
+        print(f"  ▼ {item['name']}: {item['from']} → {item['to']} ({item['delta']})")
+    return 0
+
+
+def cmd_watch(args):
+    """Смотрит за папкой: пересканирует только то, что изменилось."""
+    import time as _time
+    root = _require(_root(args))
+    print(f"наблюдаю за {root} (интервал {args.interval}s, Ctrl+C — стоп)")
+
+    def signature():
+        sig = {}
+        for child in Path(root).iterdir():
+            if not child.is_dir() or child.name.startswith("."):
+                continue
+            best = child.stat().st_mtime
+            git_index = child / ".git" / "index"
+            try:
+                best = max(best, git_index.stat().st_mtime)
+            except OSError:
+                pass
+            sig[child.name] = best
+        return sig
+
+    known = signature()
+    try:
+        while True:
+            _time.sleep(args.interval)
+            fresh = signature()
+            changed = [name for name, stamp in fresh.items()
+                       if known.get(name) != stamp]
+            if not changed:
+                continue
+            print(f"{_time.strftime('%H:%M:%S')} изменились: {', '.join(changed[:8])}"
+                  + (" …" if len(changed) > 8 else ""))
+            _rescan(root)
+            known = signature()
+    except KeyboardInterrupt:
+        print("\nстоп.")
+        return 0
 
 
 def _force_utf8():
@@ -155,11 +291,38 @@ def build_parser():
     p.add_argument("--limit", type=int, default=40)
     p.set_defaults(func=cmd_todos)
 
-    p = sub.add_parser("export", help="собрать фид galaxy.json для визуала")
+    p = sub.add_parser("export", help="собрать фид galaxy.json / markdown-отчёт")
     p.add_argument("root", nargs="?", default=None)
     p.add_argument("--out", default=None)
+    p.add_argument("--md", default=None, help="путь для markdown-отчёта")
     p.add_argument("--no-scan", action="store_true", help="не пересканировать, взять базу")
     p.set_defaults(func=cmd_export)
+
+    p = sub.add_parser("dupes", help="поиск проектов-дубликатов")
+    p.add_argument("root", nargs="?", default=None)
+    p.set_defaults(func=cmd_dupes)
+
+    p = sub.add_parser("secrets", help="поиск утёкших секретов (exit 1, если найдены)")
+    p.add_argument("root", nargs="?", default=None)
+    p.set_defaults(func=cmd_secrets)
+
+    p = sub.add_parser("disk", help="кто съел диск: вес проектов и мусора")
+    p.add_argument("root", nargs="?", default=None)
+    p.set_defaults(func=cmd_disk)
+
+    p = sub.add_parser("doctor", help="диагностика окружения (только чтение)")
+    p.add_argument("root", nargs="?", default=None)
+    p.add_argument("--name", default=None, help="один проект вместо всех")
+    p.set_defaults(func=cmd_doctor)
+
+    p = sub.add_parser("diff", help="что изменилось между двумя последними сканами")
+    p.add_argument("root", nargs="?", default=None)
+    p.set_defaults(func=cmd_diff)
+
+    p = sub.add_parser("watch", help="следить за папкой и пересканировать изменения")
+    p.add_argument("root", nargs="?", default=None)
+    p.add_argument("--interval", type=int, default=600, help="секунды между проверками")
+    p.set_defaults(func=cmd_watch)
 
     p = sub.add_parser("ui", help="поднять визуал на http://127.0.0.1:17373")
     p.add_argument("root", nargs="?", default=None)

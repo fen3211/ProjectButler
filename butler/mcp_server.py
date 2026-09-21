@@ -10,10 +10,14 @@ import sys
 import traceback
 
 from . import config
+from .disk import human_bytes
+from .doctor import diagnose, format_report as doctor_report
+from .dupes import find_dupes
 from .health import evaluate, primary_stack
 from .index import build_feed, format_report, node as galaxy_node, summarize
 from .scanner import scan
-from .store import get_project, list_projects, norm_root, save_projects
+from .store import (diff_scans, get_project, list_projects, norm_root,
+                    save_projects)
 
 SERVER_NAME = "project-butler"
 SERVER_VERSION = "0.2.0"
@@ -83,6 +87,33 @@ TOOLS = [
     {
         "name": "butler_galaxy",
         "description": "Фид «галактика проектов»: узлы с координатами, здоровьем и метриками.",
+        "inputSchema": {"type": "object", "properties": {"root": ROOT_SCHEMA}},
+    },
+    {
+        "name": "butler_disk",
+        "description": "Кто съел диск: вес проектов и мусорных директорий (node_modules, .venv...).",
+        "inputSchema": {"type": "object", "properties": {"root": ROOT_SCHEMA, "limit": LIMIT_SCHEMA}},
+    },
+    {
+        "name": "butler_dupes",
+        "description": "Проекты-дубликаты: схожесть по зависимостям, README и структуре.",
+        "inputSchema": {"type": "object", "properties": {"root": ROOT_SCHEMA}},
+    },
+    {
+        "name": "butler_secrets",
+        "description": "Утёкшие секреты в коде: токены, ключи API, пароли (замаскированные превью).",
+        "inputSchema": {"type": "object", "properties": {"root": ROOT_SCHEMA}},
+    },
+    {
+        "name": "butler_doctor",
+        "description": "Диагностика окружения проекта: git/python/node в PATH, venv, pip check, npm ls. Только чтение.",
+        "inputSchema": {"type": "object", "properties": {
+            "name": {"type": "string", "description": "Имя или путь проекта"},
+            "root": ROOT_SCHEMA}, "required": ["name"]},
+    },
+    {
+        "name": "butler_diff",
+        "description": "Что изменилось между двумя последними сканами: новые/удалённые проекты, рост и падение score.",
         "inputSchema": {"type": "object", "properties": {"root": ROOT_SCHEMA}},
     },
 ]
@@ -264,6 +295,90 @@ def tool_galaxy(args):
     return json.dumps(build_feed(root, records), ensure_ascii=False, indent=1)
 
 
+def tool_disk(args):
+    root, records, _ = _records(args.get("root"))
+    limit = int(args.get("limit") or 20)
+    rows = []
+    total_junk = 0
+    for rec in records:
+        disk = (rec.get("facts") or {}).get("disk") or {}
+        total_junk += disk.get("junk", 0)
+        rows.append((rec["name"], disk.get("total", 0), disk.get("junk", 0),
+                     disk.get("parts", [])))
+    rows.sort(key=lambda r: -r[2])
+    lines = [f"Диск по {root}: мусора всего {human_bytes(total_junk)}", ""]
+    for name, total, junk, parts in rows[:limit]:
+        top = ", ".join(f"{p['name']} {human_bytes(p['bytes'])}" for p in parts[:3])
+        lines.append(f"- {name}: всего {human_bytes(total)}, мусор {human_bytes(junk)}"
+                     + (f" ({top})" if top else ""))
+    return "\n".join(lines)
+
+
+def tool_dupes(args):
+    root, records, _ = _records(args.get("root"))
+    enriched = []
+    for rec in records:
+        item = dict(rec)
+        item["tagline"] = galaxy_node(rec, root)["tagline"]
+        enriched.append(item)
+    links = find_dupes(enriched)
+    if not links:
+        return "Дублей не найдено — подозрительно чисто."
+    lines = [f"Похожие проекты в {root}: {len(links)} пар", ""]
+    for link in links:
+        lines.append(f"- {link['a']} ≈ {link['b']} (схожесть {link['score']})")
+        lines.append(f"    общее: {', '.join(link['shared'][:6])}")
+    return "\n".join(lines)
+
+
+def tool_secrets(args):
+    root, records, _ = _records(args.get("root"))
+    found = []
+    for rec in records:
+        facts = rec.get("facts") or {}
+        for item in facts.get("secrets", []) or []:
+            found.append({**item, "project": rec["name"]})
+        if facts.get("env_leak_risk"):
+            found.append({"project": rec["name"], "file": ".env", "line": 0,
+                          "kind": "env-leak-risk", "preview": ".env не в .gitignore"})
+    if not found:
+        return "Секретов не найдено. Впечатляет."
+    lines = [f"Найдено секретов: {len(found)}", ""]
+    for item in found:
+        where = f"{item['file']}" + (f":{item['line']}" if item.get("line") else "")
+        lines.append(f"- [{item['kind']}] {item['project']} :: {where} — {item['preview']}")
+    lines.append("")
+    lines.append("Срочно: выкати новые ключи и вынеси значения в .env (который в .gitignore).")
+    return "\n".join(lines)
+
+
+def tool_doctor(args):
+    root = norm_root(config.resolve_root(args.get("root")))
+    rec = get_project(args["name"], root)
+    if not rec:
+        return f"Проект '{args['name']}' не найден в {root}."
+    return doctor_report(rec, diagnose(rec))
+
+
+def tool_diff(args):
+    root = norm_root(config.resolve_root(args.get("root")))
+    diff = diff_scans(root)
+    if diff["scans"] < 2:
+        return "Нужно минимум два скана, чтобы было что сравнивать."
+    lines = [f"Диф по {root}:", ""]
+    if diff["added"]:
+        lines.append("Новые: " + ", ".join(diff["added"]))
+    if diff["removed"]:
+        lines.append("Ушли: " + ", ".join(diff["removed"]))
+    for item in diff["improved"]:
+        lines.append(f"▲ {item['name']}: {item['from']} → {item['to']} (+{item['delta']})")
+    for item in diff["worsened"]:
+        lines.append(f"▼ {item['name']}: {item['from']} → {item['to']} ({item['delta']})")
+    if not (diff["added"] or diff["removed"] or diff["improved"] or diff["worsened"]):
+        lines.append("Тишь да гладь — ничего не изменилось.")
+    return "\n".join(lines)
+
+
 HANDLERS = {
     "butler_status": tool_status,
     "butler_list_projects": tool_list,
@@ -273,6 +388,11 @@ HANDLERS = {
     "butler_search": tool_search,
     "butler_scan": tool_scan,
     "butler_galaxy": tool_galaxy,
+    "butler_disk": tool_disk,
+    "butler_dupes": tool_dupes,
+    "butler_secrets": tool_secrets,
+    "butler_doctor": tool_doctor,
+    "butler_diff": tool_diff,
 }
 
 

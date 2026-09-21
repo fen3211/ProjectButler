@@ -14,7 +14,7 @@ const HIT_RADIUS = 16;
 const TOP_LABELS = 8;
 
 const state = {
-  feed: null, stars: [], hidden: new Set(),
+  feed: null, stars: [], hidden: new Set(), byName: {},
   yaw: 0.6, pitch: -0.34, zoom: 1,
   hover: null, selected: null, width: 0, height: 0,
 };
@@ -139,8 +139,11 @@ function buildStars() {
     z: p.pos[2] * SPREAD,
     color: STACK_COLORS[p.stack] || STACK_COLORS.unknown,
     status: STATUS_COLORS[p.status] || STATUS_COLORS.unknown,
-    size: 2.2 + (p.score / 100) * 5.2 + Math.min(3.4, p.todos / 6),
+    size: 2.2 + (p.score / 100) * 5.2 + Math.min(3.4, p.todos / 6)
+        + Math.min(3, Math.log10((p.junk_bytes || 0) + 1) * 0.55),
   })).map((s, i) => ({ ...s, index: i, screen: { x: 0, y: 0, r: 0, s: 0 } }));
+  state.byName = {};
+  state.stars.forEach((s) => { state.byName[s.node.name] = s; });
 }
 
 function statBox(value, label) {
@@ -312,6 +315,25 @@ function drawStars(order) {
   });
 }
 
+function drawDupes() {
+  const links = state.feed.links || [];
+  if (!links.length) return;
+  ctx.save();
+  ctx.setLineDash([5, 5]);
+  ctx.lineWidth = 1.2;
+  for (const link of links) {
+    const a = state.byName[link.a];
+    const b = state.byName[link.b];
+    if (!a || !b || !visible(a) || !visible(b)) continue;
+    ctx.strokeStyle = hexA('#f472b6', 0.3 + link.score * 0.45);
+    ctx.beginPath();
+    ctx.moveTo(a.screen.x, a.screen.y);
+    ctx.lineTo(b.screen.x, b.screen.y);
+    ctx.stroke();
+  }
+  ctx.restore();
+}
+
 let projected = [];
 function draw() {
   if (!state.feed) return;
@@ -323,6 +345,7 @@ function draw() {
     return { star, pr };
   }).sort((a, b) => b.pr.z - a.pr.z);
   drawLinks(projected);
+  drawDupes();
   drawStars(projected);
 }
 
@@ -368,12 +391,106 @@ function row(label, value) {
   return '<div class="row"><span>' + esc(label) + '</span><span>' + esc(value) + '</span></div>';
 }
 
+function humanBytes(num) {
+  num = Number(num) || 0;
+  const units = ['B', 'KB', 'MB', 'GB', 'TB'];
+  let i = 0;
+  while (num >= 1024 && i < units.length - 1) { num /= 1024; i++; }
+  return (i === 0 ? Math.round(num) : num.toFixed(1)) + ' ' + units[i];
+}
+
+function sparkline(history) {
+  if (!history || history.length < 2) return '';
+  const pts = [...history].reverse();                 // старые слева
+  const w = 280, h = 36;
+  const step = w / (pts.length - 1);
+  const poly = pts.map((p, i) =>
+    (i * step).toFixed(1) + ',' + (h - (p.score / 100) * (h - 6) - 3).toFixed(1)).join(' ');
+  return '<svg viewBox="0 0 ' + w + ' ' + h + '" class="spark">' +
+    '<polyline points="' + poly + '" fill="none" stroke="#7dd3fc" stroke-width="2"/>' +
+    '</svg><div class="muted small">история score (последние ' + pts.length + ' сканов)</div>';
+}
+
+async function loadHistory(star) {
+  const box = document.getElementById('sparkBox');
+  if (!box) return;
+  try {
+    const data = await api('/api/history?path=' + encodeURIComponent(star.node.path));
+    box.innerHTML = sparkline(data.history) ||
+      '<span class="muted small">история появится после второго скана</span>';
+  } catch (err) {
+    box.innerHTML = '<span class="muted small">история недоступна: ' + esc(err.message) + '</span>';
+  }
+}
+
+async function runDoctor(star, btn) {
+  const out = document.getElementById('doctorOut');
+  if (btn) btn.disabled = true;
+  if (out) out.innerHTML = '<div class="muted small">диагностирую…</div>';
+  try {
+    const data = await api('/api/doctor', { path: star.node.path });
+    const rows = data.checks.map((c) =>
+      '<div class="row"><span>' + (c.ok ? '✓' : '✗') + ' ' + esc(c.check) + '</span>' +
+      '<span>' + esc(c.detail || '') + '</span></div>').join('');
+    if (out) out.innerHTML = '<div class="section">Диагностика</div>' + rows;
+  } catch (err) {
+    if (out) out.innerHTML = '<div class="warnbox">' + esc(err.message) + '</div>';
+  } finally {
+    if (btn) btn.disabled = false;
+  }
+}
+
+async function gitInit(star, btn) {
+  if (!window.confirm('Создать git-репозиторий, .gitignore и первый коммит в «' +
+      star.node.name + '»?')) return;
+  if (btn) btn.disabled = true;
+  try {
+    await api('/api/gitinit', { path: star.node.path, confirm: true });
+    say('git создан: ' + star.node.name);
+    await init(true);
+    const again = state.byName[star.node.name];
+    if (again) renderPanel(again);
+  } catch (err) {
+    fail('git не создался: ' + err.message);
+    if (btn) btn.disabled = false;
+  }
+}
+
+async function cleanJunk(star, part, btn) {
+  if (!window.confirm('Снести «' + part + '» в ' + star.node.name + '?\n' +
+      'Его можно пересоздать (npm install / python -m venv), но это займёт время.')) return;
+  if (btn) btn.disabled = true;
+  try {
+    const res = await api('/api/clean', { path: star.node.path, part: part, confirm: true });
+    say('снесено ' + res.removed + ', освобождено ' + humanBytes(res.freed_bytes));
+    await init(true);
+    const again = state.byName[star.node.name];
+    if (again) renderPanel(again);
+  } catch (err) {
+    fail('Не снеслось: ' + err.message);
+    if (btn) btn.disabled = false;
+  }
+}
 function renderPanel(star) {
   const n = star.node;
-  const size = n.size_top ? Math.round(n.size_top / 1024) + ' KB в корне' : '—';
   const meter = Math.max(3, n.score);
   const penalties = (n.penalties || []).map((p) => '<li>' + esc(p.why) + ' (' + p.points + ')</li>').join('');
   const bonuses = (n.bonuses || []).map((b) => '<li>+' + b.points + ' ' + esc(b.why) + '</li>').join('');
+
+  const junk = n.junk_bytes || 0;
+  const diskHtml = junk > 0
+    ? '<div class="section">Мусор на диске: <b>' + humanBytes(junk) + '</b></div>' +
+      (n.junk_parts || []).map((p) =>
+        '<div class="junkrow"><span>' + esc(p.name) + '</span>' +
+        '<span class="muted">' + humanBytes(p.bytes) + '</span>' +
+        '<button data-clean="' + esc(p.name) + '">снести</button></div>').join('')
+    : '';
+  const warns = [];
+  if (n.secrets > 0) warns.push('найдено секретов: ' + n.secrets);
+  if (n.env_leak_risk) warns.push('.env не в .gitignore');
+  const warnHtml = warns.length
+    ? '<div class="warnbox">⚠ ' + warns.map(esc).join(' · ') + '</div>' : '';
+
   ui.panel.innerHTML =
     '<h2>' + esc(n.name) + '</h2>' +
     '<div class="tagline">' + esc(n.tagline || n.rel) + '</div>' +
@@ -385,23 +502,39 @@ function renderPanel(star) {
     row('точка входа', n.entry || '—') +
     row('зависимости', n.deps) +
     row('TODO внутри', n.todos) +
-    row('размер', size) +
+    row('вес на диске', humanBytes(n.total_bytes)) +
     row('README', n.has_readme ? 'есть' : 'нет') +
+    warnHtml +
     (penalties ? '<ul class="why">' + penalties + '</ul>' : '') +
     (bonuses ? '<ul class="why bonus">' + bonuses + '</ul>' : '') +
+    diskHtml +
+    '<div id="sparkBox" class="muted small">история загружается…</div>' +
     '<div class="sub" style="margin-top:12px">' + esc(n.path) + '</div>' +
     '<div class="actions">' +
     '<button data-open="explorer">Проводник</button>' +
     '<button data-open="code">VS Code</button>' +
     '<button data-open="terminal">Терминал</button>' +
+    '<button id="doctorBtn">Диагностика</button>' +
+    (n.has_git ? '' : '<button id="gitBtn">Создать git</button>') +
     '<button data-copy="path">Копировать путь</button>' +
-    '</div>';
+    '</div>' +
+    '<div id="doctorOut"></div>';
+
   ui.panel.querySelectorAll('button[data-open]').forEach((btn) => {
     btn.onclick = () => openTarget(n.path, btn.dataset.open, btn);
+  });
+  ui.panel.querySelectorAll('button[data-clean]').forEach((btn) => {
+    btn.onclick = () => cleanJunk(star, btn.dataset.clean, btn);
   });
   ui.panel.querySelector('button[data-copy]').onclick = () => {
     navigator.clipboard.writeText(n.path).then(() => say('путь скопирован: ' + n.path));
   };
+  const doctorBtn = ui.panel.querySelector('#doctorBtn');
+  if (doctorBtn) doctorBtn.onclick = () => runDoctor(star, doctorBtn);
+  const gitBtn = ui.panel.querySelector('#gitBtn');
+  if (gitBtn) gitBtn.onclick = () => gitInit(star, gitBtn);
+
+  loadHistory(star);
 }
 
 async function openTarget(path, how, btn) {

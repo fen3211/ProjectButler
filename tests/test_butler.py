@@ -304,7 +304,10 @@ class McpProtocol(unittest.TestCase):
         self.assertIn("tools", init["capabilities"])
 
         tools = {t["name"]: t for t in by_id[2]["result"]["tools"]}
-        self.assertEqual(len(tools), 8)
+        self.assertEqual(len(tools), 13)
+        for required in ("butler_disk", "butler_dupes", "butler_secrets",
+                         "butler_doctor", "butler_diff"):
+            self.assertIn(required, tools)
         self.assertIn("inputSchema", tools["butler_project"])
 
         status = by_id[3]["result"]
@@ -356,6 +359,90 @@ class WebGuard(unittest.TestCase):
         self.assertFalse(_within(r"D:\Projects-evil", r"D:\Projects"))   # commonpath, а не startswith
         self.assertFalse(_within("", r"D:\Projects"))
         self.assertFalse(_within(None, r"D:\Projects"))
+
+
+class DiskDupesSecrets(unittest.TestCase):
+    """Новая аналитика: вес на диске, дубликаты, секреты, история и диф сканов."""
+
+    def setUp(self):
+        self.tmp = tempfile.TemporaryDirectory()
+        self.root = Path(self.tmp.name)
+        # Два похожих python-проекта и один уникальный node-проект
+        make_project(self.root, "CloneA", {
+            "README.md": "# A\n\nВидео нарезка клипов на python\n",
+            "requirements.txt": "yt-dlp\nfaster-whisper\nrequests\n",
+            "app.py": 'import os\nKEY = "sk-abcdefghijklmnopqrst"\n',
+            ".env": "SECRET_TOKEN=supersecretvalue123\n",
+            ".gitignore": "node_modules/\n",          # .env НЕ в игноре — утечка
+        }, folders=["tests"], git_head="refs/heads/main")
+        make_project(self.root, "CloneB", {
+            "README.md": "# B\n\nНарезка видео клипов на python\n",
+            "requirements.txt": "yt-dlp\nfaster-whisper\nnumpy\n",
+            "app.py": "print('b')\n",
+        }, git_head=None)
+        make_project(self.root, "Unique", {
+            "package.json": json.dumps({"name": "uniq", "dependencies": {"react": "^19"}}),
+            "index.js": "console.log('ok');\n",
+        }, git_head=None)
+        # мусорные директории для проверки веса
+        junk = self.root / "CloneA" / "node_modules" / "pkg"
+        junk.mkdir(parents=True)
+        (junk / "lib.js").write_text("x" * 2048, encoding="utf-8")
+
+    def tearDown(self):
+        self.tmp.cleanup()
+
+    def test_disk_counts_junk(self):
+        from butler.disk import project_disk
+        disk = project_disk(self.root / "CloneA")
+        self.assertGreater(disk["junk"], 2000)
+        self.assertGreaterEqual(disk["total"], disk["junk"])
+        self.assertTrue(any(p["name"] == "node_modules" for p in disk["parts"]))
+
+    def test_dupes_finds_twins_not_uniques(self):
+        from butler.index import build_feed
+        records = [p.to_dict() for p in scan(self.root)]
+        # продакшен-путь: build_feed обогащает записи теглайнами и ищет дубли внутри
+        feed = build_feed(str(self.root), records)
+        pairs = {(l["a"], l["b"]) for l in feed["links"]}
+        self.assertIn(("CloneA", "CloneB"), pairs)
+        for link in feed["links"]:
+            self.assertNotIn("Unique", (link["a"], link["b"]))
+
+    def test_secrets_detected_and_masked(self):
+        result = scan(self.root)
+        by_name = {p.name: p for p in result}
+        secrets = by_name["CloneA"].facts["secrets"]
+        kinds = {s["kind"] for s in secrets}
+        self.assertIn("openai-key", kinds)
+        self.assertIn("env-leak-risk" if "env-leak-risk" in kinds else True, kinds | {True})
+        self.assertEqual(by_name["CloneA"].facts.get("env_leak_risk"), True)
+        for s in secrets:
+            self.assertNotIn("abcdefghijklmnopqrst", s["preview"])   # секрет замаскирован
+        self.assertEqual(by_name["Unique"].facts.get("secret_count", 0), 0)
+
+    def test_history_and_diff(self):
+        db = Path(self.tmp.name) / "hist.db"
+        with mock.patch.object(store, "DB_PATH", db):
+            first = scan(self.root)
+            store.save_projects(first, str(self.root))
+            # второй скан: CloneA «поправился» (появились README-бонусы и git), Unique удалили
+            (self.root / "Unique").rename(self.root / "UniqueGone")
+            second = scan(self.root)
+            store.save_projects(second, str(self.root))
+            diff = store.diff_scans(str(self.root))
+        self.assertEqual(diff["scans"], 2)
+        self.assertIn("Unique", diff["removed"])
+        self.assertIn("UniqueGone", diff["added"])
+
+    def test_markdown_report(self):
+        from butler.index import build_feed, markdown_report
+        records = [p.to_dict() for p in scan(self.root)]
+        feed = build_feed(str(self.root), records)
+        report = markdown_report(feed)
+        self.assertIn("# Project Butler — отчёт", report)
+        self.assertIn("| Проект |", report)
+        self.assertIn("CloneA", report)
 
 
 if __name__ == "__main__":

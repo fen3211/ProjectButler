@@ -1,5 +1,6 @@
 """SQLite-хранилище результатов: ~/.project-butler/butler.db. Только стандартная библиотека."""
 import json
+import os
 import sqlite3
 import time
 from pathlib import Path
@@ -21,7 +22,21 @@ CREATE TABLE IF NOT EXISTS projects (
     todo_count INTEGER,
     health TEXT,
     scanned_at REAL
-)
+);
+CREATE TABLE IF NOT EXISTS history (
+    root TEXT,
+    path TEXT,
+    scan_ts REAL,
+    score INTEGER,
+    status TEXT,
+    todo_count INTEGER,
+    junk_bytes INTEGER
+);
+CREATE TABLE IF NOT EXISTS scan_index (
+    root TEXT,
+    scan_ts REAL,
+    names TEXT
+);
 """
 
 # Колонки, которые досыпаются в старую базу через ALTER TABLE (миграция без потери данных)
@@ -47,7 +62,8 @@ def _connect():
     DB_PATH.parent.mkdir(parents=True, exist_ok=True)
     conn = sqlite3.connect(str(DB_PATH))
     conn.row_factory = sqlite3.Row          # доступ по именам колонок: ALTER TABLE не ломает чтение
-    conn.execute(SCHEMA)
+    conn.executescript(SCHEMA)              # три CREATE TABLE разом: execute умеет лишь один statement
+
     have = {row[1] for row in conn.execute("PRAGMA table_info(projects)")}
     for col, ddl in MIGRATIONS.items():
         if col not in have:
@@ -84,9 +100,81 @@ def save_projects(projects, root):
                 now,
             ) for p in projects],
         )
+        # История: снапшот score/status на каждый скан + состав проектов
+        conn.executemany(
+            "INSERT INTO history (root, path, scan_ts, score, status, todo_count, junk_bytes)"
+            " VALUES (?,?,?,?,?,?,?)",
+            [(
+                root, _val(p, "path"), now,
+                int((_val(p, "health", {}) or {}).get("score", 0) or 0),
+                (_val(p, "health", {}) or {}).get("status", "unknown"),
+                _val(p, "todo_count", 0) or 0,
+                int(((_val(p, "facts", {}) or {}).get("disk") or {}).get("junk", 0) or 0),
+            ) for p in projects],
+        )
+        names = sorted(_val(p, "name") for p in projects)
+        conn.execute("INSERT INTO scan_index (root, scan_ts, names) VALUES (?,?,?)",
+                     (root, now, json.dumps(names, ensure_ascii=False)))
         conn.commit()
     finally:
         conn.close()
+
+
+def history_for(path, limit=12) -> list:
+    """Свежие точки истории проекта: [(scan_ts, score, status, todo_count, junk_bytes)]."""
+    conn = _connect()
+    try:
+        rows = conn.execute(
+            "SELECT scan_ts, score, status, todo_count, junk_bytes FROM history"
+            " WHERE path = ? ORDER BY scan_ts DESC LIMIT ?", (path, limit)).fetchall()
+    finally:
+        conn.close()
+    return [{"ts": r[0], "score": r[1], "status": r[2], "todos": r[3], "junk": r[4]}
+            for r in rows]
+
+
+def diff_scans(root) -> dict:
+    """Разница между двумя последними сканами: кто пришёл/ушёл/похорошел/сдал."""
+    conn = _connect()
+    try:
+        scans = conn.execute(
+            "SELECT scan_ts, names FROM scan_index WHERE root = ?"
+            " ORDER BY scan_ts DESC LIMIT 2", (root,)).fetchall()
+        if len(scans) < 2:
+            return {"scans": len(scans), "added": [], "removed": [], "improved": [], "worsened": []}
+        ts_new, ts_old = scans[0][0], scans[1][0]
+        names_new = set(json.loads(scans[0][1]))
+        names_old = set(json.loads(scans[1][1]))
+        rows = conn.execute(
+            "SELECT path, score, status, todo_count, junk_bytes, scan_ts FROM history"
+            " WHERE root = ? AND scan_ts IN (?, ?)", (root, ts_new, ts_old)).fetchall()
+    finally:
+        conn.close()
+    by_path = {}
+    for path, score, status, todos, junk, ts in rows:
+        slot = "new" if ts == ts_new else "old"
+        by_path.setdefault(path, {})[slot] = {
+            "score": score, "status": status, "todos": todos, "junk": junk}
+    improved, worsened = [], []
+    for path, pair in by_path.items():
+        if "new" not in pair or "old" not in pair:
+            continue
+        delta = pair["new"]["score"] - pair["old"]["score"]
+        name = os.path.basename(path)
+        if delta > 0:
+            improved.append({"name": name, "delta": delta,
+                             "from": pair["old"]["score"], "to": pair["new"]["score"]})
+        elif delta < 0:
+            worsened.append({"name": name, "delta": delta,
+                             "from": pair["old"]["score"], "to": pair["new"]["score"]})
+    return {
+        "scans": 2,
+        "scan_ts": ts_new, "prev_ts": ts_old,
+        "added": sorted(names_new - names_old),
+        "removed": sorted(names_old - names_new),
+        "improved": sorted(improved, key=lambda d: -d["delta"]),
+        "worsened": sorted(worsened, key=lambda d: d["delta"]),
+    }
 
 
 def _row_to_dict(r) -> dict:

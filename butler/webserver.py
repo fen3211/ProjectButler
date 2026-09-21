@@ -1,17 +1,22 @@
 """Локальный сервер для визуала: статика ui/, фид и мини-API. Слушает только 127.0.0.1."""
 import json
 import os
+import shutil
 import subprocess
 import sys
 import threading
 import webbrowser
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
+from urllib.parse import parse_qs, urlsplit
 
 from . import config
+from .disk import JUNK_DIRS
+from .doctor import diagnose
 from .index import build_feed, read_feed, summarize, write_feed, node as galaxy_node
 from .scanner import scan
-from .store import list_projects, norm_root, save_projects
+from .store import (diff_scans, history_for, list_projects, norm_root,
+                    save_projects)
 
 UI_DIR = Path(__file__).resolve().parent.parent / "ui"
 STATIC_TYPES = {
@@ -23,6 +28,18 @@ STATIC_TYPES = {
     ".ico": "image/x-icon",
 }
 MAX_BODY = 64 * 1024
+
+# Шаблоны .gitignore по стекам — для кнопки «крестить git'ом»
+GITIGNORE_TEMPLATES = {
+    "python": "__pycache__/\n*.pyc\n.venv/\nvenv/\n.env\n*.log\n.pytest_cache/\n.mypy_cache/\n",
+    "node": "node_modules/\n.next/\nout/\ndist/\n.env\n*.log\n",
+    "csharp": "bin/\nobj/\n*.user\n.vs/\n",
+    "go": "bin/\nvendor/\n",
+    "js": "node_modules/\ndist/\n.env\n*.log\n",
+    "docker": "",
+    "git": "",
+}
+GITIGNORE_COMMON = ".DS_Store\nThumbs.db\n"
 
 
 def _within(path, root) -> bool:
@@ -124,6 +141,13 @@ class ButlerHandler(BaseHTTPRequestHandler):
             return self._json(summarize(nodes))
         if path == "/api/roots":
             return self._json({"current": self.root, "roots": config.known_roots()})
+        if path == "/api/diff":
+            return self._json(diff_scans(norm_root(self.root)))
+        if path == "/api/history":
+            target = (parse_qs(urlsplit(self.path).query).get("path") or [""])[0]
+            if not _within(target, self.root):
+                return self._error(403, "Путь вне корня сканирования — отказ")
+            return self._json({"path": target, "history": history_for(target)})
         return self._error(404, f"Нет такого маршрута: {path}")
 
     def do_POST(self):                                   # noqa: N802
@@ -161,7 +185,82 @@ class ButlerHandler(BaseHTTPRequestHandler):
             except OSError as exc:
                 return self._error(500, f"Не открылось: {exc}")
             return self._json({"ok": True, "opened": target, "how": how, "note": note})
+        if path == "/api/doctor":
+            target = args.get("path") or ""
+            if not _within(target, self.root):
+                return self._error(403, "Путь вне корня сканирования — отказ")
+            rec = next((r for r in list_projects(norm_root(self.root))
+                        if r["path"] == target), None)
+            if rec is None:
+                return self._error(404, "Проект не найден в базе — пересканируй")
+            return self._json({"ok": True, "project": rec["name"], "checks": diagnose(rec)})
+        if path == "/api/gitinit":
+            return self._git_init(args)
+        if path == "/api/clean":
+            return self._clean_junk(args)
         return self._error(404, f"Нет такого маршрута: {path}")
+
+    # ---------- действия (мутируют диск) ----------
+    def _git_init(self, args):
+        target = args.get("path") or ""
+        if not _within(target, self.root):
+            return self._error(403, "Путь вне корня сканирования — отказ")
+        if args.get("confirm") is not True:
+            return self._error(400, "Нужно подтверждение: {\"confirm\": true}")
+        if (Path(target) / ".git").exists():
+            return self._error(400, "git тут уже есть")
+        git = shutil.which("git")
+        if not git:
+            return self._error(500, "git не найден в PATH")
+        rec = next((r for r in list_projects(norm_root(self.root))
+                    if r["path"] == target), None)
+        stacks = (rec or {}).get("stacks", [])
+        ignore = GITIGNORE_COMMON + "".join(GITIGNORE_TEMPLATES.get(st, "") for st in stacks)
+        gitignore = Path(target) / ".gitignore"
+        if not gitignore.exists():
+            gitignore.write_text(ignore, encoding="utf-8")
+        steps = []
+        for cmd in ([git, "init", "-b", "main"],
+                    [git, "add", "-A"],
+                    [git, "-c", "user.name=Project Butler",
+                     "-c", "user.email=butler@localhost",
+                     "commit", "-m", "chore: initial commit (via Project Butler)",
+                     "--no-gpg-sign"]):
+            try:
+                proc = subprocess.run(cmd, cwd=target, capture_output=True, text=True,
+                                      timeout=120, encoding="utf-8", errors="replace")
+            except (OSError, subprocess.TimeoutExpired) as exc:
+                return self._error(500, f"{' '.join(cmd[1:3])}: {exc}")
+            steps.append({"cmd": " ".join(cmd[1:3]), "code": proc.returncode})
+            if proc.returncode != 0:
+                return self._json({"ok": False, "steps": steps,
+                                   "error": (proc.stderr or proc.stdout).strip()[:400]}, 500)
+        return self._json({"ok": True, "steps": steps, "gitignore": ignore})
+
+    def _clean_junk(self, args):
+        target = args.get("path") or ""
+        part = args.get("part") or ""
+        if part not in JUNK_DIRS:
+            return self._error(400, f"Не белый список мусора: {part!r}")
+        full = os.path.join(target, part)
+        if not _within(full, self.root):
+            return self._error(403, "Путь вне корня сканирования — отказ")
+        if args.get("confirm") is not True:
+            return self._error(400, "Нужно подтверждение: {\"confirm\": true}")
+        if not os.path.isdir(full):
+            return self._error(404, f"Нет такой папки: {full}")
+        size = 0
+        for dirpath, _dirs, files in os.walk(full):
+            for name in files:
+                try:
+                    size += os.path.getsize(os.path.join(dirpath, name))
+                except OSError:
+                    continue
+        try:
+            shutil.rmtree(full, ignore_errors=False)
+        except OSError as exc:
+            return self._error(500, f"Не удалилось: {exc}")
+        return self._json({"ok": True, "removed": full, "freed_bytes": size})
 
 
 def _open_target(path, how) -> str:
@@ -194,6 +293,17 @@ def serve(root=None, port=17373, open_browser=True):
     httpd = ButlerHTTPServer(("127.0.0.1", port), ButlerHandler)
     httpd.butler_root = root
     url = f"http://127.0.0.1:{port}/"
+
+    def refresh_in_background():
+        """При старте обновляем данные: UI сразу показывает прошлый скан,
+        а через пару секунд приходит свежий (диск-вес и секреты ходят по файлам)."""
+        try:
+            save_projects(scan(root), root)
+            write_feed(config.FEED_PATH, build_feed(root, list_projects(root)))
+        except Exception as exc:                            # noqa: BLE001 — UI не должен падать из-за фона
+            sys.stderr.write(f"butler-ui: фоновый перескан не удался: {exc}\n")
+
+    threading.Thread(target=refresh_in_background, daemon=True).start()
     print(f"Project Butler UI: {url}\nкорень: {root}\nфид: {config.FEED_PATH}\nCtrl+C — стоп.")
     if open_browser:
         threading.Timer(0.6, lambda: webbrowser.open(url)).start()

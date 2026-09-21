@@ -13,8 +13,13 @@
 | Health-score | штрафы (нет README / нет git / env без `.env.example` / протухшие зависимости / не установлено) и бонусы (тесты, CI, lock) |
 | Статусы | `alive` / `abandoned` (>180 дней) / `broken` (<40 баллов) / `unknown` (пусто) |
 | TODO-грепер | TODO/FIXME/HACK/XXX/BUG с файлом и строкой, с игнором `node_modules`, `.venv` и т.д. |
+| Диск | вес проектов и мусорных директорий (node_modules/.venv/…), кнопка «снести» в UI |
+| Дубликаты | Жаккар-схожесть по зависимостям/README/структуре, розовые пунктирные рёбра в галактике |
+| Секреты | токены ботов, ключи OpenAI/Google/AWS и пароли в коде, замаскированные превью; `.env` вне `.gitignore` |
+| Доктор | диагностика окружения: git/python/node в PATH, venv, `pip check`, `npm ls` — только чтение |
+| История | каждый скан пишет снапшот score; в карточке спарклайн, `butler diff` — что изменилось |
 | Галактика | браузерный 3D-визуал: кластеры по стеку, свечение по score, ринг — по статусу; клик открывает папку |
-| MCP-сервер | 8 инструментов для Claude / Cline по stdio (без SDK) |
+| MCP-сервер | 13 инструментов для Claude / Cline по stdio (без SDK) |
 | sqlite-база | `~/.project-butler/butler.db`, миграции без потери данных |
 
 ## Быстрый старт
@@ -29,8 +34,13 @@ run.bat                      :: скан D:\Projects + открыть галак
 ```bat
 py -3.12 -m butler scan D:\Projects       :: скан -> sqlite
 py -3.12 -m butler report                 :: таблица «сначала сгнившее»
-py -3.12 -m butler todos --tag FIXME      :: хвосты по коду
-py -3.12 -m butler export                 :: фид galaxy.json
+py -3.12 -m butler disk D:\Projects       :: кто съел диск (мусор по папкам)
+py -3.12 -m butler dupes D:\Projects      :: проекты-дубликаты
+py -3.12 -m butler secrets D:\Projects    :: утёкшие ключи (exit 1, если найдены)
+py -3.12 -m butler doctor D:\Projects     :: диагностика окружения (только чтение)
+py -3.12 -m butler diff D:\Projects       :: диф двух последних сканов
+py -3.12 -m butler watch D:\Projects      :: следить за папкой (авто-рескан)
+py -3.12 -m butler export --md report.md  :: markdown-отчёт
 py -3.12 -m butler ui                     :: http://127.0.0.1:17373
 py -3.12 -m butler mcp                    :: MCP-сервер по stdio
 ```
