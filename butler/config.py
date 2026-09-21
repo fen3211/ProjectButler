@@ -10,7 +10,7 @@ DB_PATH = HOME / "butler.db"
 SETTINGS_PATH = HOME / "settings.json"
 FALLBACK_ROOT = r"D:\Projects"
 
-DEFAULT_SETTINGS = {"theme": "darkmatter", "lang": "ru", "custom": {}}
+DEFAULT_SETTINGS = {"theme": "darkmatter", "lang": "ru", "custom": {}, "watch": False, "multi": []}
 
 
 def load_settings() -> dict:
@@ -23,9 +23,11 @@ def load_settings() -> dict:
     except (OSError, ValueError):
         return dict(DEFAULT_SETTINGS)
     out = dict(DEFAULT_SETTINGS)
-    out.update({k: v for k, v in data.items() if k in ("theme", "lang", "custom")})
+    out.update({k: v for k, v in data.items() if k in ("theme", "lang", "custom", "watch", "multi")})
     if not isinstance(out["custom"], dict):
         out["custom"] = {}
+    if not isinstance(out["multi"], list):
+        out["multi"] = []
     return out
 
 
@@ -33,13 +35,17 @@ def save_settings(settings) -> dict:
     """Пишет настройки (только известные ключи), возвращает сохранённое."""
     out = dict(DEFAULT_SETTINGS)
     out.update({k: v for k, v in (settings or {}).items()
-                if k in ("theme", "lang", "custom")})
+                if k in ("theme", "lang", "custom", "watch", "multi")})
     if out["theme"] not in ("darkmatter", "deepspace", "mars", "observatory", "custom"):
         out["theme"] = "darkmatter"
     if out["lang"] not in ("ru", "en"):
         out["lang"] = "ru"
     if not isinstance(out["custom"], dict):
         out["custom"] = {}
+    out["watch"] = bool(out["watch"])
+    if not isinstance(out["multi"], list):
+        out["multi"] = []
+    out["multi"] = [str(r) for r in out["multi"]][:6]
     HOME.mkdir(parents=True, exist_ok=True)
     with open(SETTINGS_PATH, "w", encoding="utf-8") as fh:
         json.dump(out, fh, ensure_ascii=False, indent=2)

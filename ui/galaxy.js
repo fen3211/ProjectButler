@@ -98,6 +98,15 @@ const I18N = {
     res_kick: 'воскрешение · ', kick_diag: 'диагностика', junk_kick: 'мусор на диске · ',
     hist: 'история score', hist_last: 'последние', hist_scans: 'сканов',
     hist_none: 'появится после второго скана', runlog_head_idle: 'диагностика',
+    todo_kick: 'TODO · клик — открыть в VS Code',
+    pulse_kick: 'пульс · коммиты за 30 дней', pulse_none: 'коммитов не было — тишина в эфире',
+    wrapped_btn: 'wrapped', w_title: 'отчёт миссии',
+    w_period: 'дней в полёте', w_scans: 'сканов', w_projects: 'проектов на орбите',
+    w_best: 'лучший', w_worst: 'худший', w_oldest: 'самый заброшенный',
+    w_risen: 'выросли', w_fallen: 'просяли', w_todos: 'TODO тогда → сейчас',
+    w_junk: 'мусора сейчас', w_stacks: 'стеки', w_nothing: 'истории нет — сделай пару сканов',
+    set_watch: 'наблюдать за диском (авто-рескан + тосты)',
+    set_roots: 'мульти-корень: сканировать всё отмеченное',
   },
   en: {
     digest_btn: 'digest', browse_btn: 'browse', scan_btn: 'scan',
@@ -143,6 +152,15 @@ const I18N = {
     res_kick: 'resurrect · ', kick_diag: 'diagnostics', junk_kick: 'junk on disk · ',
     hist: 'score history', hist_last: 'last', hist_scans: 'scans',
     hist_none: 'appears after second scan', runlog_head_idle: 'diagnostics',
+    todo_kick: 'TODO · click opens in VS Code',
+    pulse_kick: 'pulse · commits in 30 days', pulse_none: 'no commits — radio silence',
+    wrapped_btn: 'wrapped', w_title: 'mission report',
+    w_period: 'days in flight', w_scans: 'scans', w_projects: 'projects on orbit',
+    w_best: 'best', w_worst: 'worst', w_oldest: 'most abandoned',
+    w_risen: 'risen', w_fallen: 'declined', w_todos: 'TODO then → now',
+    w_junk: 'junk now', w_stacks: 'stacks', w_nothing: 'no history yet — run a couple of scans',
+    set_watch: 'watch the disk (auto-rescan + toasts)',
+    set_roots: 'multi-root: scan everything checked',
   },
 };
 
@@ -171,6 +189,9 @@ function applyLang() {
   if (ps) ps.textContent = t('p_scan');
   const dk = document.querySelector('#digest .pkick');
   if (dk) dk.textContent = t('d_title');
+  const wk = document.querySelector('#wrapped .pkick');
+  if (wk) wk.textContent = t('wrapped_btn') + ' · ' + t('w_title');
+  if (ui.wrappedBtn) ui.wrappedBtn.textContent = t('wrapped_btn');
 }
 
 const canvas = document.getElementById('sky');
@@ -200,6 +221,11 @@ const ui = {
   setClose: document.getElementById('setClose'),
   setKick: document.getElementById('setKick'),
   setGhLine: document.getElementById('setGhLine'),
+  wrapped: document.getElementById('wrapped'),
+  wrappedMeta: document.getElementById('wrappedMeta'),
+  wrappedBody: document.getElementById('wrappedBody'),
+  wrappedClose: document.getElementById('wrappedClose'),
+  wrappedBtn: document.getElementById('wrappedBtn'),
 };
 
 /* ---------- пикер папок ---------- */
@@ -494,6 +520,44 @@ function renderSettings() {
   });
   body.append(langRow);
 
+  const watchKick = document.createElement('div');
+  watchKick.className = 'secKick';
+  watchKick.textContent = t('settings');
+  body.append(watchKick);
+  const watchRow = document.createElement('div');
+  watchRow.className = 'setrow';
+  const watch = ghSwitch(t('set_watch'), !!state.settings.watch, (on) => {
+    saveSettings({ watch: on }).then(() => say('watch: ' + (on ? 'on' : 'off')));
+  });
+  watchRow.append(watch.wrap);
+  body.append(watchRow);
+
+  const rootsKick = document.createElement('div');
+  rootsKick.className = 'secKick';
+  rootsKick.textContent = t('set_roots');
+  body.append(rootsKick);
+  const rootsRow = document.createElement('div');
+  rootsRow.className = 'setrow';
+  rootsRow.style.flexDirection = 'column';
+  rootsRow.style.alignItems = 'stretch';
+  const normJs = (r) => String(r || '').replace(/[\/]+$/, '');
+  api('/api/roots').then((data) => {
+    const multi = new Set((state.settings.multi || []).map(normJs));
+    (data.roots || []).forEach((root) => {
+      const item = ghSwitch(root, multi.has(normJs(root)), (on) => {
+        const set = new Set(state.settings.multi || []);
+        if (on) set.add(root); else set.delete(root);
+        saveSettings({ multi: [...set] }).then(() => {
+          say('мульти-скан: ' + (set.size ? [...set].join(' + ') : 'выключен'));
+        });
+      });
+      item.wrap.style.borderBottom = '1px solid var(--hair)';
+      item.wrap.style.padding = '5px 0';
+      rootsRow.append(item.wrap);
+    });
+  }).catch(() => {});
+  body.append(rootsRow);
+
   const ghKick = document.createElement('div');
   ghKick.className = 'secKick';
   ghKick.textContent = t('set_gh');
@@ -577,6 +641,9 @@ async function renderGhAuth(box) {
 ui.setClose.addEventListener('click', closeSettings);
 ui.settingsPanel.addEventListener('click', (ev) => { if (ev.target === ui.settingsPanel) closeSettings(); });
 ui.settingsBtn.addEventListener('click', openSettings);
+ui.wrappedClose.addEventListener('click', closeWrapped);
+ui.wrapped.addEventListener('click', (ev) => { if (ev.target === ui.wrapped) closeWrapped(); });
+ui.wrappedBtn.addEventListener('click', openWrapped);
 
 /* ---------- живой фид: фид сменился на диске — галактика обновляется сама ---------- */
 
@@ -1587,6 +1654,12 @@ function renderPanel(star) {
     warnHtml +
     (penalties ? '<ul class="why">' + penalties + '</ul>' : '') +
     (bonuses ? '<ul class="why bonus">' + bonuses + '</ul>' : '') +
+    ((n.todo_list || []).length
+      ? '<div class="kick" style="margin-top:14px">' + t('todo_kick') + '</div>' +
+        '<div class="todolist" id="todoList"></div>'
+      : '') +
+    '<div class="kick" style="margin-top:14px">' + t('pulse_kick') + '</div>' +
+    '<div class="pulse" id="pulseBox"><i style="opacity:.2"></i></div>' +
     diskHtml +
     '<div id="sparkBox"></div>' +
     '<div class="acts">' +
@@ -1638,10 +1711,12 @@ function renderPanel(star) {
   };
 
   renderTags(star, meta);
+  renderTodos(star);
   wireNote(star);
   wireRun(star);
   wireResurrect(star);
   renderGhBox(star);
+  loadGitPulse(star);
 
   loadHistory(star);
 }
@@ -1834,6 +1909,111 @@ function pluralDays(days) {
   if (d1 > 1 && d1 < 5) return 'дня';
   if (d1 === 1) return 'день';
   return 'дней';
+}
+
+/* ---------- TODO с переходом в код и Git-пульс ---------- */
+
+function renderTodos(star) {
+  const box = ui.detail.querySelector('#todoList');
+  if (!box) return;
+  const todos = star.node.todo_list || [];
+  todos.forEach((td) => {
+    const row = document.createElement('div');
+    row.className = 'todoitem';
+    row.title = td.file + ':' + td.line;
+    const txt = document.createElement('span');
+    txt.className = 'txt';
+    txt.innerHTML = '<b>' + esc(td.tag || 'TODO') + '</b> ' + esc(td.text || '');
+    const loc = document.createElement('span');
+    loc.className = 'loc';
+    loc.textContent = td.file + ':' + td.line;
+    row.append(txt, loc);
+    row.onclick = () => {
+      const url = 'vscode://file/' + (star.node.path + '/' + td.file).replace(/\\/g, '/') +
+        ':' + td.line;
+      window.open(url, '_blank');
+      say('открываю в VS Code: ' + td.file + ':' + td.line);
+    };
+    box.append(row);
+  });
+}
+
+function loadGitPulse(star) {
+  const box = ui.detail.querySelector('#pulseBox');
+  if (!box) return;
+  api('/api/gitpulse?path=' + encodeURIComponent(star.node.path)).then((data) => {
+    const fresh = ui.detail.querySelector('#pulseBox');
+    if (!fresh) return;
+    if (!data.days || !data.days.length) {
+      fresh.innerHTML = '';
+      const empty = document.createElement('div');
+      empty.className = 'pempty';
+      empty.style.textAlign = 'left';
+      empty.style.padding = '4px 2px';
+      empty.textContent = t('pulse_none');
+      fresh.append(empty);
+      return;
+    }
+    const max = Math.max.apply(null, data.days.concat([1]));
+    fresh.innerHTML = '';
+    data.days.forEach((n) => {
+      const bar = document.createElement('i');
+      bar.style.height = Math.max(6, Math.round(n / max * 100)) + '%';
+      bar.style.opacity = n ? '.85' : '.18';
+      bar.title = n + '';
+      fresh.append(bar);
+    });
+  }).catch(() => {});
+}
+
+/* ---------- Projects Wrapped: отчёт миссии ---------- */
+
+function wrappedOpen() { return ui.wrapped.classList.contains('open'); }
+
+function openWrapped() {
+  ui.wrapped.classList.add('open');
+  ui.wrappedBody.innerHTML = '<div class="pempty">' + t('p_reading') + '</div>';
+  api('/api/wrapped').then((data) => {
+    ui.wrappedMeta.textContent = (data.roots || []).join(' + ');
+    ui.wrappedBody.innerHTML = renderWrapped(data);
+  }).catch((err) => {
+    ui.wrappedBody.innerHTML = '<div class="pempty">' + esc(err.message) + '</div>';
+  });
+}
+
+function closeWrapped() { ui.wrapped.classList.remove('open'); }
+
+function renderWrapped(d) {
+  if (!d.scans) return '<div class="pempty">' + t('w_nothing') + '</div>';
+  const rows = [];
+  const wrow = (k, v) => '<div class="wrow"><span>' + k + '</span><b>' + v + '</b></div>';
+  rows.push(wrow(t('w_period'), d.period_days));
+  rows.push(wrow(t('w_scans'), d.scans));
+  rows.push(wrow(t('w_projects'), d.projects));
+  if (d.best) rows.push(wrow('🏆 ' + t('w_best'), esc(d.best[0]) + ' · ' + d.best[1]));
+  if (d.worst) rows.push(wrow('💀 ' + t('w_worst'), esc(d.worst[0]) + ' · ' + d.worst[1]));
+  if (d.oldest) rows.push(wrow('🌙 ' + t('w_oldest'), esc(d.oldest[0]) + ' · ' + d.oldest[1] + 'd'));
+  rows.push(wrow(t('w_todos'), d.todos_first + ' → ' + d.todos_last));
+  rows.push(wrow(t('w_junk'), humanBytes(d.junk_bytes)));
+  const stacks = Object.entries(d.stacks || {}).sort((a, b) => b[1] - a[1]);
+  if (stacks.length) {
+    rows.push(wrow(t('w_stacks'), stacks.map(([k, v]) => k + ' ' + v).join(' · ')));
+  }
+  if ((d.risen || []).length) {
+    rows.push('<div class="kick" style="margin-top:14px">▲ ' + t('w_risen') + '</div>');
+    d.risen.forEach((it) => {
+      rows.push('<div class="wrow"><span>🚀 ' + esc(it.name) + '</span><b style="color:var(--good)">' +
+        it.from + ' → ' + it.to + ' (+' + it.delta + ')</b></div>');
+    });
+  }
+  if ((d.fallen || []).length) {
+    rows.push('<div class="kick" style="margin-top:14px">▼ ' + t('w_fallen') + '</div>');
+    d.fallen.forEach((it) => {
+      rows.push('<div class="wrow"><span>🪦 ' + esc(it.name) + '</span><b style="color:var(--bad)">' +
+        it.from + ' → ' + it.to + ' (' + it.delta + ')</b></div>');
+    });
+  }
+  return rows.join('');
 }
 
 /* ---------- GitHub в карточке: публикация, приватность, настройки, релизы ---------- */
@@ -2088,6 +2268,7 @@ window.addEventListener('keydown', (ev) => {
   if (ev.key === 'Escape') {
     if (pickerOpen()) { closePicker(); return; }
     if (digestOpen()) { closeDigest(); return; }
+    if (wrappedOpen()) { closeWrapped(); return; }
     if (settingsOpen()) { closeSettings(); return; }
     state.fly = { yaw: 0.6, pitch: -0.34, zoom: 1 };   // домой — плавно, а не телепортом
     select(null);

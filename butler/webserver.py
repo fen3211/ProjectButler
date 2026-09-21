@@ -13,13 +13,13 @@ from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
 from urllib.parse import parse_qs, urlsplit
 
-from . import config, github as gh, resurrect as resurrect_mod, readme_gen, runner
+from . import config, github as gh, notify, resurrect as resurrect_mod, readme_gen, runner
 from .disk import JUNK_DIRS
 from .doctor import diagnose
-from .index import build_feed, read_feed, summarize, write_feed, node as galaxy_node
+from .index import build_feed, build_feed_multi, read_feed, summarize, write_feed, node as galaxy_node
 from .scanner import scan
-from .store import (all_meta, diff_scans, get_meta, history_for, list_projects, norm_root,
-                    prev_scores, save_projects, set_note, set_tags)
+from .store import (all_meta, diff_scans, get_meta, get_project, history_for, list_projects,
+                    norm_root, prev_scores, save_projects, set_note, set_tags, wrapped)
 
 UI_DIR = Path(__file__).resolve().parent.parent / "ui"
 STATIC_TYPES = {
@@ -327,6 +327,13 @@ class ButlerHandler(BaseHTTPRequestHandler):
             return self._json({"q": q, "results": self._search_content(q)})
         if path == "/api/digest":
             return self._json(self._digest())
+        if path == "/api/wrapped":
+            return self._json(self._wrapped())
+        if path == "/api/gitpulse":
+            target = (parse_qs(urlsplit(self.path).query).get("path") or [""])[0]
+            if not _within(target, self.root):
+                return self._error(403, "Путь вне корня сканирования — отказ")
+            return self._json(self._gitpulse(target))
         if path == "/api/feed-version":
             try:
                 mtime = os.path.getmtime(config.FEED_PATH)
@@ -422,21 +429,24 @@ class ButlerHandler(BaseHTTPRequestHandler):
                 return self._error(409, "Скан уже идёт — дождись окончания")
             return self._json({"ok": True, "root": new_root, "scanning": True})
         if path == "/api/scan":
-            root = norm_root(args.get("root") or self.root)
-            if not os.path.isdir(root):
-                return self._error(400, f"Папка не найдена: {root}")
+            roots = self._roots_set(args.get("root"))
+            for r in roots:
+                if not os.path.isdir(r):
+                    return self._error(400, f"Папка не найдена: {r}")
 
             def rescan_work():
-                save_projects(scan(root), root)
-                config.remember_root(root)
-                feed = build_feed(root, list_projects(root))
-                write_feed(config.FEED_PATH, feed)
-                if root == norm_root(self.root):
-                    self.server.butler_root = root
+                for r in roots:
+                    save_projects(scan(r), r)
+                    config.remember_root(r)
+                records = []
+                for r in roots:
+                    records.extend(list_projects(r))
+                write_feed(config.FEED_PATH, build_feed_multi(roots, records))
+                self.server.butler_root = roots[0]
 
-            if not self.server.butler_scan.start(root, rescan_work):
+            if not self.server.butler_scan.start(roots[0], rescan_work):
                 return self._error(409, "Скан уже идёт — дождись окончания")
-            return self._json({"ok": True, "root": root, "scanning": True})
+            return self._json({"ok": True, "root": " ⊕ ".join(roots), "scanning": True})
         if path == "/api/open":
             target = args.get("path") or ""
             if not _within(target, self.root):
@@ -582,6 +592,21 @@ class ButlerHandler(BaseHTTPRequestHandler):
 
     # ---------- чтение для API ----------
 
+    def _roots_set(self, override=None):
+        """Корни для скана/дайджеста/wrapped: первичный + отмеченные в настройках."""
+        roots = [norm_root(override or self.root)]
+        for r in (config.load_settings().get("multi") or []):
+            nr = norm_root(r)
+            if os.path.isdir(nr) and nr not in roots:
+                roots.append(nr)
+        return [r for r in roots if os.path.isdir(r)]
+
+    def _merged_records(self, roots):
+        records = []
+        for r in roots:
+            records.extend(list_projects(r))
+        return records
+
     def _rec_for(self, target):
         """Запись проекта по пути; прямые слеши нормализуем, иначе база не узнает свой проект."""
         want = norm_root(target)
@@ -625,16 +650,106 @@ class ButlerHandler(BaseHTTPRequestHandler):
                 break
         return out
 
+    def _gitpulse(self, target):
+        """Коммиты за 30 дней по дням — пульс активности в карточке."""
+        import time as _time
+        git = shutil.which("git")
+        if not git or not os.path.isdir(os.path.join(target, ".git")):
+            return {"days": [], "total": 0}
+        try:
+            out = subprocess.run(
+                [git, "-C", target, "log", "--since=30.days", "--pretty=%ct"],
+                capture_output=True, text=True, timeout=15,
+                encoding="utf-8", errors="replace").stdout
+        except (OSError, subprocess.TimeoutExpired):
+            return {"days": [], "total": 0}
+        days = [0] * 30
+        now = _time.time()
+        total = 0
+        for line in out.splitlines():
+            line = line.strip()
+            if not line.isdigit():
+                continue
+            age_days = int((now - int(line)) // 86400)
+            if 0 <= age_days < 30:
+                days[29 - age_days] += 1
+                total += 1
+        return {"days": days, "total": total}
+
     def _digest(self):
-        """Что изменилось с прошлого скана + пара цифр для контекста."""
-        root = norm_root(self.root)
-        records = list_projects(root)
+        """Что изменилось с прошлого скана + пара цифр для контекста (по всем корням)."""
+        roots = self._roots_set()
+        records = self._merged_records(roots)
         junk = sum(int(((r.get("facts") or {}).get("disk") or {}).get("junk", 0) or 0)
                    for r in records)
         secrets = sum(int((r.get("facts") or {}).get("secret_count", 0) or 0) for r in records)
         todos = sum(int(r.get("todo_count", 0) or 0) for r in records)
-        return {"root": root, "projects": len(records), "junk_bytes": junk,
-                "secrets": secrets, "todos": todos, "diff": diff_scans(root)}
+        merged = {"scans": 0, "added": [], "removed": [], "improved": [], "worsened": []}
+        for r in roots:
+            d = diff_scans(r)
+            merged["scans"] = max(merged["scans"], d.get("scans", 0))
+            merged["added"] += d.get("added", [])
+            merged["removed"] += d.get("removed", [])
+            merged["improved"] += d.get("improved", [])
+            merged["worsened"] += d.get("worsened", [])
+        for key in ("added", "removed"):
+            merged[key] = sorted(set(merged[key]))
+        merged["improved"] = sorted(merged["improved"], key=lambda x: -x["delta"])
+        merged["worsened"] = sorted(merged["worsened"], key=lambda x: x["delta"])
+        return {"root": " ⊕ ".join(roots), "projects": len(records), "junk_bytes": junk,
+                "secrets": secrets, "todos": todos, "diff": merged}
+
+    def _wrapped(self):
+        """Отчёт миссии: вся история сканов, переведённая в человеческие superlatives."""
+        import time as _time
+        roots = self._roots_set()
+        data = wrapped(roots)
+        records = self._merged_records(roots)
+        series = data.get("series") or {}
+        risen, fallen = [], []
+        best = worst = None
+        todos_first = todos_last = 0
+        oldest = None
+        for rec in records:
+            path = rec["path"]
+            score = rec.get("score", 0)
+            name = rec.get("name", path)
+            if best is None or score > best[1]:
+                best = (name, score)
+            if worst is None or score < worst[1]:
+                worst = (name, score)
+            if rec.get("idle_days", 0) is not None and (oldest is None
+                                                        or rec.get("idle_days", 0) > oldest[1]):
+                oldest = (name, rec.get("idle_days", 0))
+            entries = series.get(path) or []
+            if entries:
+                first, last = entries[0], entries[-1]
+                todos_first += first.get("todos", 0) or 0
+                todos_last += last.get("todos", 0) or 0
+                delta = last.get("score", 0) - first.get("score", 0)
+                if delta >= 8:
+                    risen.append({"name": name, "from": first["score"], "to": last["score"],
+                                  "delta": delta})
+                elif delta <= -8:
+                    fallen.append({"name": name, "from": first["score"], "to": last["score"],
+                                   "delta": delta})
+        junk = sum(int(((r.get("facts") or {}).get("disk") or {}).get("junk", 0) or 0)
+                   for r in records)
+        stacks = {}
+        for rec in records:
+            for st in rec.get("stacks", []) or []:
+                if st != "git":
+                    stacks[st] = stacks.get(st, 0) + 1
+        period_days = 0
+        if data.get("first_ts") and data.get("last_ts"):
+            period_days = max(1, int((data["last_ts"] - data["first_ts"]) / 86400))
+        risen.sort(key=lambda x: -x["delta"])
+        fallen.sort(key=lambda x: x["delta"])
+        return {"roots": roots, "scans": data.get("scans", 0), "period_days": period_days,
+                "projects": len(records), "junk_bytes": junk,
+                "todos_first": todos_first, "todos_last": todos_last,
+                "best": best, "worst": worst, "oldest": oldest,
+                "risen": risen[:5], "fallen": fallen[:5], "stacks": stacks}
 
     # ---------- действия (мутируют диск) ----------
     def _git_init(self, args):
@@ -778,6 +893,55 @@ def serve(root=None, port=17373, open_browser=True):
         write_feed(config.FEED_PATH, build_feed(root, list_projects(root)))
 
     httpd.butler_scan.start(root, startup_scan)     # через тот же ScanState: без гонок с ручным сканом
+
+    def watch_roots():
+        roots = [norm_root(httpd.butler_root)]
+        for r in (config.load_settings().get("multi") or []):
+            nr = norm_root(r)
+            if os.path.isdir(nr) and nr not in roots:
+                roots.append(nr)
+        return [r for r in roots if os.path.isdir(r)]
+
+    def watch_loop():
+        """Раз в 90с смотрит на mtime верхнего уровня корней: диск изменился —
+        тихий рескан + тост. Тумблер в настройках: settings.watch."""
+        last = None
+        while True:
+            time.sleep(90)
+            try:
+                if httpd.butler_scan.status()["running"]:
+                    continue
+                if not config.load_settings().get("watch"):
+                    last = None
+                    continue
+                roots = watch_roots()
+                snap = {}
+                for r in roots:
+                    try:
+                        snap[r] = {e.name: e.stat().st_mtime for e in os.scandir(r)}
+                    except OSError:
+                        snap[r] = {}
+                if last is not None and snap != last and roots:
+                    def work(roots=roots):
+                        for r in roots:
+                            save_projects(scan(r), r)
+                        records = []
+                        for r in roots:
+                            records.extend(list_projects(r))
+                        write_feed(config.FEED_PATH, build_feed_multi(roots, records))
+                        for r in roots:
+                            d = diff_scans(r)
+                            if d.get("added") or d.get("removed"):
+                                notify.toast(
+                                    "Project Butler",
+                                    r + ": +" + str(len(d["added"])) + " новых, -"
+                                    + str(len(d["removed"])) + " ушли")
+                    httpd.butler_scan.start(roots[0], work)
+                last = snap
+            except Exception as exc:                    # noqa: BLE001 — вотчер не имеет права умереть
+                sys.stderr.write(f"butler-watch: {exc}\n")
+
+    threading.Thread(target=watch_loop, daemon=True).start()
     print(f"Project Butler UI: {url}\nкорень: {root}\nфид: {config.FEED_PATH}\nCtrl+C — стоп.")
     if open_browser:
         threading.Timer(0.6, lambda: webbrowser.open(url)).start()

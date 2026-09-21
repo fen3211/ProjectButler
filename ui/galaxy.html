@@ -621,6 +621,7 @@
            spellcheck="false" autocomplete="off" title="Папка с проектами">
     <datalist id="rootList"></datalist>
     <button id="digestBtn" title="Что изменилось с прошлого скана">дайджест</button>
+    <button id="wrappedBtn" title="Отчёт миссии — вся история сканов">wrapped</button>
     <button id="browseBtn" title="Выбрать папку на диске">обзор</button>
     <button id="rootApply" title="Просканировать папку">скан</button>
     <button id="settingsBtn" title="Темы, язык, GitHub">⚙</button>
@@ -650,6 +651,17 @@
       <button class="pclose" id="digestClose" title="закрыть (Esc)">×</button>
     </div>
     <div class="plist" id="digestBody"></div>
+  </div>
+</div>
+
+<div id="wrapped" class="picker">
+  <div class="pbox" role="dialog" aria-label="Отчёт миссии" style="width: 560px;">
+    <div class="phead">
+      <div class="pkick">wrapped · отчёт миссии</div>
+      <div class="ppath" id="wrappedMeta"></div>
+      <button class="pclose" id="wrappedClose" title="закрыть (Esc)">×</button>
+    </div>
+    <div class="plist" id="wrappedBody"></div>
   </div>
 </div>
 
@@ -715,5 +727,23 @@
   .switch input:checked + i::after { transform: translateX(18px); background: var(--accent); }
   .secKick { margin-top: 18px; font-size: 10px; letter-spacing: .24em; text-transform: uppercase;
     color: var(--mute); border-top: 1px solid var(--hair); padding-top: 14px; }
+</style>
+</body>
+<style>
+  /* ---------- todo-список, пульс, wrapped ---------- */
+  .todoitem { display: flex; justify-content: space-between; align-items: baseline; gap: 10px;
+    padding: 6px 8px; border-radius: 9px; font-size: 12px; cursor: pointer; color: var(--dim);
+    transition: background 120ms ease, color 120ms ease; }
+  .todoitem:hover { background: rgba(157, 140, 255, .10); color: var(--txt); }
+  .todoitem .txt { flex: 1; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+  .todoitem .txt b { color: var(--warn); font-weight: 500; }
+  .todoitem .loc { color: var(--mute); font-family: var(--mono); font-size: 10.5px; white-space: nowrap; }
+  .pulse { display: flex; align-items: flex-end; gap: 2px; height: 34px; margin-top: 8px; }
+  .pulse i { flex: 1; min-height: 2px; border-radius: 1px 1px 0 0;
+    background: linear-gradient(180deg, var(--accent), transparent); opacity: .8; }
+  .wrow { display: flex; justify-content: space-between; align-items: baseline; gap: 14px;
+    padding: 7px 0; border-bottom: 1px solid var(--hair); font-size: 13px; }
+  .wrow span:first-child { color: var(--dim); }
+  .wrow b { font-weight: 550; }
 </style>
 </body>

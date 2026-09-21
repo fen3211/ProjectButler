@@ -103,6 +103,16 @@ def diagnose(rec, timeout=20) -> list:
                     "все свежие" if not stale else f"устарело: {stale}")
             else:
                 add("устаревшие пакеты (pip)", None, out[:80] or "pip отказался отвечать")
+            # аудит уязвимостей: отдельный пакет pip-audit — если стоит, проверяем
+            code, out = _run([str(venv), "-m", "pip_audit", "--version"], path, 15)
+            if code != 0:
+                add("аудит уязвимостей (pip)", None, "pip-audit не установлен (pip install pip-audit)")
+            else:
+                code, out = _run([str(venv), "-m", "pip_audit", "-l", "--progress-spinner", "off"],
+                                 path, 90)
+                ok = code == 0 and "No known vulnerabilities" in out
+                add("аудит уязвимостей (pip)", ok if code == 0 else None,
+                    out.splitlines()[-1][:120] if out else "проверено")
 
     if "node" in stacks or "js" in stacks:
         node_exe = tools.get("node")
@@ -138,6 +148,23 @@ def diagnose(rec, timeout=20) -> list:
                 stale = len([l for l in out.splitlines() if l.strip()])
                 add("устаревшие пакеты (npm)", code == 0 and stale == 0,
                     "все свежие" if stale == 0 else f"устарело: {stale}")
+            # аудит уязвимостей: npm умеет сам, ходит в реестр
+            code, out = _run(["cmd", "/c", npm, "audit", "--json"], path, 60)
+            if code is None:
+                add("аудит уязвимостей (npm)", None, "не успел проверить")
+            elif out.strip():
+                try:
+                    vulns = (json.loads(out).get("metadata") or {}).get("vulnerabilities") or {}
+                except ValueError:
+                    vulns = {}
+                if not vulns:
+                    add("аудит уязвимостей (npm)", None, "ответ не разобрался")
+                else:
+                    bad = int(vulns.get("critical", 0) or 0) + int(vulns.get("high", 0) or 0)
+                    total = sum(int(v or 0) for v in vulns.values())
+                    add("аудит уязвимостей (npm)", bad == 0,
+                        "уязвимостей нет" if total == 0 else
+                        f"всего {total}, критичных+высоких: {bad}")
 
     entry = facts.get("entry")
     if entry:

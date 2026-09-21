@@ -111,6 +111,7 @@ def node(rec, root) -> dict:
         "penalties": health.get("penalties", []),
         "bonuses": health.get("bonuses", []),
         "todos": _val(rec, "todo_count", 0) or 0,
+        "todo_list": (facts.get("todos") or [])[:8],
         "size_top": _val(rec, "size_top", 0) or 0,
         "junk_bytes": disk.get("junk", 0),
         "total_bytes": disk.get("total", 0),
@@ -165,6 +166,32 @@ def build_feed(root, records) -> dict:
         "generated_at": time.time(),
         "generated_at_iso": time.strftime("%Y-%m-%d %H:%M:%S"),
         "root": root,
+        "clusters": {k: list(v) for k, v in CLUSTERS.items()},
+        "links": find_dupes(enriched),
+        "totals": summarize(nodes),
+        "projects": sorted(nodes, key=lambda n: (-n["score"], n["name"])),
+    }
+
+
+def build_feed_multi(roots, records) -> dict:
+    """Фид из нескольких корней: каждая запись несёт свой root для relpath.
+
+    Дубликаты и диффы честно ищутся и между корнями — общие зависимости
+    не знают про границы папок.
+    """
+    roots = list(roots or [])
+    nodes = [node(r, _val(r, "root", roots[0] if roots else "")) for r in records]
+    enriched = []
+    for i, rec in enumerate(records):
+        item = dict(rec) if isinstance(rec, dict) else rec.to_dict()
+        item["tagline"] = nodes[i]["tagline"]
+        enriched.append(item)
+    return {
+        "feed_version": FEED_VERSION,
+        "generated_at": time.time(),
+        "generated_at_iso": time.strftime("%Y-%m-%d %H:%M:%S"),
+        "root": " ⊕ ".join(roots) if roots else "",
+        "multi": roots,
         "clusters": {k: list(v) for k, v in CLUSTERS.items()},
         "links": find_dupes(enriched),
         "totals": summarize(nodes),

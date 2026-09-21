@@ -155,6 +155,29 @@ def prev_scores(root) -> dict:
     return {path: score for path, score in rows}
 
 
+def wrapped(roots) -> dict:
+    """Сырьё для отчёта миссии: вся история по корням, сгруппированная по проекту."""
+    roots = [r for r in (roots or []) if r]
+    if not roots:
+        return {"scans": 0, "series": {}}
+    qs = ",".join("?" * len(roots))
+    conn = _connect()
+    try:
+        meta = conn.execute(
+            f"SELECT COUNT(*), MIN(scan_ts), MAX(scan_ts) FROM scan_index WHERE root IN ({qs})",
+            roots).fetchone()
+        rows = conn.execute(
+            f"SELECT path, scan_ts, score, todo_count, junk_bytes FROM history"
+            f" WHERE root IN ({qs}) ORDER BY path, scan_ts", roots).fetchall()
+    finally:
+        conn.close()
+    series = {}
+    for path, ts, score, todos, junk in rows:
+        series.setdefault(path, []).append(
+            {"ts": ts, "score": score, "todos": todos, "junk": junk})
+    return {"scans": meta[0] or 0, "first_ts": meta[1], "last_ts": meta[2], "series": series}
+
+
 def diff_scans(root) -> dict:
     """Разница между двумя последними сканами: кто пришёл/ушёл/похорошел/сдал."""
     conn = _connect()

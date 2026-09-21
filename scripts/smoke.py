@@ -130,6 +130,18 @@ def main():
     status, body = request("/api/gh/repo?path=" + quote(r"C:\Windows"))
     check("GET /api/gh/repo вне корня = 403", status == 403, body[:80])
 
+    status, body = request("/api/wrapped")
+    data = json.loads(body) if status == 200 else {}
+    check("GET /api/wrapped = отчёт миссии", status == 200 and "scans" in data and
+          "period_days" in data and "best" in data and "todos_first" in data,
+          f"сканов: {data.get('scans')}, дней: {data.get('period_days')}")
+
+    status, body = request("/api/settings", "POST", {"watch": True})
+    data = json.loads(body) if status == 200 else {}
+    check("POST /api/settings watch-тумблер", status == 200 and data.get("watch") is True,
+          str(data.get("watch")))
+    request("/api/settings", "POST", {"watch": False})
+
     status, body = request("/api/search?q=" + quote("Проект"))
     data = json.loads(body) if status == 200 else {}
     check("GET /api/search ищет по содержимому", status == 200 and isinstance(data.get("results"), list),
@@ -210,6 +222,12 @@ def main():
         names = [c.get("check") for c in data.get("checks", [])]
         check("POST /api/doctor даёт проверки окружения", status == 200 and len(names) >= 2,
               ", ".join(names[:4]))
+
+        status, body = request("/api/gitpulse?path=" + quote(str(proj)))
+        data = json.loads(body) if status == 200 else {}
+        check("GET /api/gitpulse = 30 дней пульса", status == 200 and
+              (len(data.get("days", [])) == 30 or data.get("total", -1) == 0),
+              f"дней: {len(data.get('days', []))}, коммитов: {data.get('total')}")
 
     status, body = request("/api/root", "POST", {"root": root})
     check("переключение обратно на исходный корень", status == 200, root)
