@@ -179,7 +179,7 @@ function refreshUI() {
   buildStars();
   renderTop();
   renderLegend();
-  renderDock();
+  renderDock(true);                              // карточки-папки влетают каскадом
 }
 
 async function loadFeed() {
@@ -396,7 +396,7 @@ function dockStatus(node) {
   return STATUS_LABELS[node.status];
 }
 
-function renderDock() {
+function renderDock(stagger) {
   ui.dock.innerHTML = '';
   const visibleStars = state.stars.filter(visible).sort((a, b) => b.node.score - a.node.score);
   if (!visibleStars.length) {
@@ -406,13 +406,22 @@ function renderDock() {
     ui.dock.append(empty);
     return;
   }
-  visibleStars.forEach((star) => {
+  visibleStars.forEach((star, i) => {
     const n = star.node;
     const item = document.createElement('div');
     item.className = 'item' + (star === state.selected ? ' active' : '');
     item.title = n.path;
+    if (stagger) {
+      item.classList.add('enter');
+      item.style.animationDelay = Math.min(i * 26, 620) + 'ms';
+    }
+    // папка окрашена цветом стека; на hover «приоткрывается» (CSS)
     item.innerHTML =
-      '<div class="nm"><i style="background:' + star.color + '"></i><span>' + esc(n.name) + '</span></div>' +
+      '<div class="nm" style="--stack:' + star.color + '">' +
+      '<svg class="fold" viewBox="0 0 16 16" aria-hidden="true">' +
+      '<path class="f-back" d="M1.5 4.6c0-.9.7-1.6 1.6-1.6h3l1.4 1.5h5.4c.9 0 1.6.7 1.6 1.6v.6H1.5z"/>' +
+      '<path class="f-front" d="M1.5 6.9h13l-1.4 5c-.15.62-.7 1.1-1.35 1.1H4.25c-.65 0-1.2-.48-1.35-1.1z"/>' +
+      '</svg><span>' + esc(n.name) + '</span></div>' +
       '<div class="meta"><span class="sc">' + n.score + '</span>' +
       '<span class="st st-' + n.status + '">' + esc(dockStatus(n)) + '</span></div>' +
       '<div class="track"><i style="width:' + Math.max(2, n.score) + '%;background:' +
@@ -537,20 +546,25 @@ function drawDupes() {
 }
 
 function drawStars(order) {
+  const now = performance.now();
   order.forEach((item) => {
     const star = item.star, pr = item.pr;
     const r = Math.max(1.4, star.size * pr.s * 1.3);
     const alive = star.node.status === 'alive';
     star.screen = { x: pr.x, y: pr.y, r: r + 6, s: pr.s };
 
-    const glowA = alive ? 0.5 : 0.3;
-    const glow = ctx.createRadialGradient(pr.x, pr.y, 0, pr.x, pr.y, r * 6.5);
+    // мерцание всей галактики: у каждой звезды своя фаза — небо живое
+    const tw = 0.82 + 0.18 * Math.sin(now / 620 + star.index * 2.7);
+    const isHover = star === state.hover && star !== state.selected;
+    const glowA = (alive ? 0.5 : 0.3) * tw * (isHover ? 1.7 : 1);
+    const glowR = r * 6.5 * (isHover ? 1.3 : 1);
+    const glow = ctx.createRadialGradient(pr.x, pr.y, 0, pr.x, pr.y, glowR);
     glow.addColorStop(0, hexA(star.color, glowA));
     glow.addColorStop(0.35, hexA(star.color, glowA * 0.35));
     glow.addColorStop(1, hexA(star.color, 0));
     ctx.fillStyle = glow;
     ctx.beginPath();
-    ctx.arc(pr.x, pr.y, r * 6.5, 0, Math.PI * 2);
+    ctx.arc(pr.x, pr.y, glowR, 0, Math.PI * 2);
     ctx.fill();
 
     const core = ctx.createRadialGradient(pr.x, pr.y, 0, pr.x, pr.y, r);
@@ -560,6 +574,14 @@ function drawStars(order) {
     ctx.beginPath();
     ctx.arc(pr.x, pr.y, r, 0, Math.PI * 2);
     ctx.fill();
+
+    if (isHover) {
+      ctx.strokeStyle = 'rgba(242, 244, 255, .45)';
+      ctx.lineWidth = 1;
+      ctx.beginPath();
+      ctx.arc(pr.x, pr.y, r + 6, 0, Math.PI * 2);
+      ctx.stroke();
+    }
 
     if (star.node.status === 'broken' || star.node.status === 'abandoned') {
       ctx.strokeStyle = hexA(star.status, 0.55);
@@ -571,6 +593,23 @@ function drawStars(order) {
       ctx.setLineDash([]);
     }
     if (star === state.selected) {
+      // расходящиеся рипплы — «сигнал» от выбранной звезды
+      for (let k = 0; k < 2; k++) {
+        const t = ((now / 1500) + k * 0.5) % 1;
+        ctx.strokeStyle = 'rgba(200, 212, 255,' + ((1 - t) * 0.5).toFixed(3) + ')';
+        ctx.lineWidth = 1.2;
+        ctx.beginPath();
+        ctx.arc(pr.x, pr.y, r + 7 + t * 30, 0, Math.PI * 2);
+        ctx.stroke();
+      }
+      // орбитальные спутники по псевдо-3D эллипсу — звезда «с системой»
+      for (let i = 0; i < 3; i++) {
+        const a = now / 950 + i * (Math.PI * 2 / 3);
+        ctx.fillStyle = 'rgba(226, 232, 255, .9)';
+        ctx.beginPath();
+        ctx.arc(pr.x + Math.cos(a) * (r + 15), pr.y + Math.sin(a) * (r + 15) * 0.42, 1.5, 0, Math.PI * 2);
+        ctx.fill();
+      }
       ctx.strokeStyle = 'rgba(255,255,255,.85)';
       ctx.lineWidth = 1.1;
       ctx.beginPath();
@@ -602,6 +641,7 @@ function labelWorthy(star) {
 let projected = [];
 function draw() {
   if (!state.feed) return;
+  stepFly();                                                  // плавный полёт камеры к цели
   ctx.clearRect(0, 0, state.width, state.height);
   if (state.bg) ctx.drawImage(state.bg, 0, 0, state.width, state.height);
   projected = state.stars.filter(visible).map((star) => {
@@ -612,6 +652,38 @@ function draw() {
   drawLinks(projected);
   drawDupes();
   drawStars(projected);
+}
+
+/* ---------- полёт камеры к выбранной папке ---------- */
+
+function angleNear(current, target) {
+  let t = target;
+  while (t - current > Math.PI) t -= Math.PI * 2;
+  while (current - t > Math.PI) t += Math.PI * 2;
+  return t;
+}
+
+function flyTo(star) {
+  const yaw = Math.atan2(star.x, star.z);
+  const z1 = star.x * Math.sin(yaw) + star.z * Math.cos(yaw);
+  const pitch = Math.atan2(star.y, Math.max(1e-6, z1));
+  state.fly = {
+    yaw: angleNear(state.yaw, yaw),
+    pitch: Math.max(-1.25, Math.min(1.25, angleNear(state.pitch, pitch))),
+    zoom: Math.max(state.zoom, 1.5),
+  };
+}
+
+function stepFly() {
+  if (!state.fly) return;
+  const f = state.fly;
+  let settled = true;
+  for (const k of ['yaw', 'pitch', 'zoom']) {
+    const d = f[k] - state[k];
+    if (Math.abs(d) > 0.0008) { state[k] += d * 0.075; settled = false; }
+    else state[k] = f[k];
+  }
+  if (settled) state.fly = null;
 }
 
 function pick(mx, my) {
@@ -648,6 +720,7 @@ function esc(text) {
 function select(star) {
   state.selected = star;
   if (!star) { ui.detail.classList.remove('open'); renderDock(); return; }
+  flyTo(star);                                   // камера сама доезжает до папки
   renderPanel(star);
   ui.detail.classList.add('open');
   renderDock();
@@ -831,6 +904,7 @@ let drag = null;
 
 canvas.addEventListener('pointerdown', (ev) => {
   drag = { x: ev.clientX, y: ev.clientY, moved: false };
+  state.fly = null;                              // юзер рулит камерой сам — полёт отменяем
   canvas.classList.add('dragging');
   canvas.setPointerCapture(ev.pointerId);
 });
@@ -876,7 +950,7 @@ window.addEventListener('keydown', (ev) => {
   if (ev.target === ui.rootInput) return;
   if (ev.key === 'Escape') {
     if (pickerOpen()) { closePicker(); return; }
-    state.yaw = 0.6; state.pitch = -0.34; state.zoom = 1;
+    state.fly = { yaw: 0.6, pitch: -0.34, zoom: 1 };   // домой — плавно, а не телепортом
     select(null);
     return;
   }

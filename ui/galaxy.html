@@ -172,6 +172,11 @@
     border-bottom: 1px solid var(--hair);
     background: rgba(2, 2, 6, .55); backdrop-filter: blur(14px);
   }
+  .top::after {
+    content: ""; position: absolute; left: 0; right: 0; bottom: -1px; height: 1px;
+    background: linear-gradient(90deg, transparent 4%, rgba(157, 140, 255, .45) 24%,
+      rgba(110, 231, 255, .5) 52%, rgba(157, 140, 255, .2) 76%, transparent 96%);
+  }
   .wordmark { font-size: 14px; font-weight: 350; letter-spacing: .34em; text-transform: uppercase; white-space: nowrap; }
   .wordmark em { font-style: normal; color: var(--accent); }
   .topmeta { display: flex; gap: 30px; margin-left: auto; font-variant-numeric: tabular-nums; overflow: hidden; }
@@ -207,8 +212,10 @@
   .pbox {
     width: 540px; max-width: calc(100vw - 48px); max-height: min(660px, calc(100vh - 96px));
     display: flex; flex-direction: column;
-    border: 1px solid var(--hair); border-radius: 24px;
-    background: linear-gradient(160deg, rgba(20, 18, 40, .94), rgba(6, 6, 12, .96));
+    border: 1px solid transparent; border-radius: 24px;
+    background:
+      linear-gradient(160deg, rgba(20, 18, 40, .94), rgba(6, 6, 12, .96)) padding-box,
+      linear-gradient(140deg, rgba(157, 140, 255, .5), rgba(110, 231, 255, .18) 45%, rgba(157, 140, 255, .28) 75%, rgba(110, 231, 255, .38)) border-box;
     box-shadow: 0 40px 100px rgba(0, 0, 0, .6);
   }
   .phead { padding: 22px 24px 12px; position: relative; }
@@ -289,8 +296,11 @@
   /* ---------- док проектов ---------- */
   .dock {
     position: fixed; left: 36px; right: 36px; bottom: 30px; z-index: 5;
-    border: 1px solid var(--hair); border-radius: 20px; padding: 12px 10px;
-    background: rgba(6, 6, 14, .55); backdrop-filter: blur(20px);
+    border: 1px solid transparent; border-radius: 20px; padding: 12px 10px;
+    background:
+      linear-gradient(180deg, rgba(11, 10, 24, .60), rgba(6, 6, 14, .58)) padding-box,
+      linear-gradient(115deg, rgba(157, 140, 255, .38), rgba(110, 231, 255, .14) 40%, rgba(255, 122, 190, .18) 70%, rgba(157, 140, 255, .42)) border-box;
+    backdrop-filter: blur(20px);
     display: flex; gap: 6px; overflow-x: auto; scrollbar-width: thin;
     scrollbar-color: var(--faint) transparent;
   }
@@ -299,13 +309,35 @@
   .dock .empty { padding: 18px 16px; color: var(--mute); font-size: 12.5px; }
   .item {
     flex: 0 0 172px; padding: 10px 13px 9px; border-radius: 13px; cursor: pointer;
-    transition: background 140ms ease;
+    border: 1px solid transparent;
+    transition: background 160ms ease, transform 200ms cubic-bezier(.2, .8, .2, 1),
+                border-color 160ms ease, box-shadow 200ms ease;
   }
-  .item:hover { background: rgba(157, 140, 255, .08); }
-  .item.active { background: rgba(157, 140, 255, .14); }
+  .item:hover {
+    background: rgba(157, 140, 255, .10);
+    transform: translateY(-3px);
+    border-color: rgba(157, 140, 255, .28);
+    box-shadow: 0 10px 26px rgba(0, 0, 0, .35);
+  }
+  .item.active {
+    background: rgba(157, 140, 255, .15);
+    border-color: rgba(157, 140, 255, .55);
+    box-shadow: inset 0 0 22px rgba(157, 140, 255, .12), 0 0 18px rgba(157, 140, 255, .18);
+  }
+  @keyframes dockRise {
+    from { opacity: 0; transform: translateY(18px) scale(.94); }
+  }
+  .item.enter { animation: dockRise .55s cubic-bezier(.2, .8, .2, 1) backwards; }
   .item .nm { display: flex; align-items: center; gap: 7px; font-size: 12px; font-weight: 450;
     white-space: nowrap; overflow: hidden; }
-  .item .nm i { width: 6px; height: 6px; border-radius: 50%; flex: none; }
+  .item .fold { width: 14px; height: 14px; flex: none; filter: drop-shadow(0 0 4px rgba(157, 140, 255, .35)); }
+  .item .fold .f-back { fill: var(--stack, #9d8cff); opacity: .5; }
+  .item .fold .f-front {
+    fill: var(--stack, #9d8cff); opacity: .95;
+    transition: transform 220ms cubic-bezier(.2, .8, .2, 1); transform-origin: center;
+  }
+  .item:hover .fold .f-front,
+  .item.active .fold .f-front { transform: translateY(-1.4px); }   /* папка «приоткрывается» */
   .item .nm span { overflow: hidden; text-overflow: ellipsis; }
   .item .meta { display: flex; justify-content: space-between; align-items: baseline; margin-top: 6px;
     font-variant-numeric: tabular-nums; }
@@ -319,8 +351,10 @@
   /* ---------- карточка проекта ---------- */
   .detail {
     position: fixed; right: 36px; top: 96px; width: 340px; z-index: 6;
-    border: 1px solid var(--hair); border-radius: 24px; padding: 26px 26px 22px;
-    background: linear-gradient(160deg, rgba(20, 18, 40, .72), rgba(6, 6, 12, .72));
+    border: 1px solid transparent; border-radius: 24px; padding: 26px 26px 22px;
+    background:
+      linear-gradient(160deg, rgba(20, 18, 40, .72), rgba(6, 6, 12, .72)) padding-box,
+      linear-gradient(140deg, rgba(157, 140, 255, .55), rgba(110, 231, 255, .16) 45%, rgba(255, 122, 190, .2) 70%, rgba(110, 231, 255, .42)) border-box;
     backdrop-filter: blur(22px);
     box-shadow: 0 30px 80px rgba(0, 0, 0, .55);
     max-height: calc(100vh - 96px - 150px); overflow-y: auto; scrollbar-width: thin;
@@ -331,6 +365,18 @@
   .detail::-webkit-scrollbar { width: 6px; }
   .detail::-webkit-scrollbar-thumb { background: var(--faint); border-radius: 3px; }
   .detail.open { opacity: 1; transform: translateX(0); pointer-events: auto; }
+  /* секции карточки влетают каскадом при каждом открытии */
+  .detail.open > * { animation: panelIn .5s cubic-bezier(.2, .8, .2, 1) backwards; }
+  .detail.open > *:nth-child(1) { animation-delay: .02s; }
+  .detail.open > *:nth-child(2) { animation-delay: .06s; }
+  .detail.open > *:nth-child(3) { animation-delay: .10s; }
+  .detail.open > *:nth-child(4) { animation-delay: .14s; }
+  .detail.open > *:nth-child(5) { animation-delay: .18s; }
+  .detail.open > *:nth-child(6) { animation-delay: .22s; }
+  .detail.open > *:nth-child(7) { animation-delay: .26s; }
+  .detail.open > *:nth-child(8) { animation-delay: .30s; }
+  .detail.open > *:nth-child(n+9) { animation-delay: .34s; }
+  @keyframes panelIn { from { opacity: 0; transform: translateY(10px); } }
   .detail .kick { font-size: 10px; letter-spacing: .26em; text-transform: uppercase; color: var(--mute); }
   .detail h2 { font-size: 21px; font-weight: 450; margin: 8px 24px 2px 0; letter-spacing: -.01em; }
   .detail .path { font-size: 10.5px; color: var(--mute); font-family: var(--mono); margin-bottom: 16px;
@@ -350,7 +396,7 @@
   .scoreline .badge { margin-left: auto; font-size: 9.5px; letter-spacing: .14em; text-transform: uppercase;
     border: 1px solid; border-radius: 999px; padding: 3px 10px; }
   .meter { height: 3px; border-radius: 2px; background: var(--hair); overflow: hidden; margin: 14px 0 2px; }
-  .meter i { display: block; height: 100%; border-radius: 2px; }
+  .meter i { display: block; height: 100%; border-radius: 2px; transition: width .7s cubic-bezier(.2, .8, .2, 1); }
   .facts { margin-top: 14px; border-top: 1px solid var(--hair); }
   .fact { display: flex; justify-content: space-between; gap: 16px; padding: 8px 0;
     border-bottom: 1px solid var(--hair); font-size: 12.5px; }
