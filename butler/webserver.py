@@ -619,10 +619,54 @@ class ButlerHandler(BaseHTTPRequestHandler):
         return self._json({"ok": True, "removed": full, "freed_bytes": size})
 
 
+def _code_launcher():
+    """Честный запускатель VS Code.
+
+    `code` на Windows — это .cmd-прокладка, голый Popen её не исполняет (WinError 2).
+    Плюс PATH может быть перехвачен форками (Cursor тоже ставит свой `code`).
+    Порядок: .cmd-прокладки из PATH с «Microsoft VS Code» в пути → их родительский
+    Code.exe → любая другая прокладка через cmd /c → стандартные пути установки.
+    """
+    shims = []
+    for d in os.environ.get("PATH", "").split(os.pathsep):
+        d = d.strip().strip('"')
+        if not d:
+            continue
+        for name in ("code.cmd", "code.bat"):
+            cand = os.path.join(d, name)
+            if os.path.isfile(cand):
+                shims.append(cand)
+    preferred = [s for s in shims if "microsoft vs code" in s.lower()]
+    for shim in preferred:
+        base = os.path.dirname(shim)
+        for _ in range(3):                              # bin/ → корень установки
+            base = os.path.dirname(base)
+            exe = os.path.join(base, "Code.exe")
+            if os.path.isfile(exe):
+                return [exe]
+    if preferred:
+        return ["cmd", "/c", preferred[0]]
+    if shims:
+        return ["cmd", "/c", shims[0]]
+    exe = shutil.which("code")
+    if exe and not exe.lower().endswith((".cmd", ".bat")):
+        return [exe]
+    for env_key, sub in (("LOCALAPPDATA", r"Programs\Microsoft VS Code\Code.exe"),
+                         ("ProgramFiles", r"Microsoft VS Code\Code.exe"),
+                         ("ProgramFiles(x86)", r"Microsoft VS Code\Code.exe")):
+        cand = os.path.join(os.environ.get(env_key, ""), sub)
+        if cand and os.path.isfile(cand):
+            return [cand]
+    return None
+
+
 def _open_target(path, how) -> str:
     """Открывает проект: проводник / VS Code / терминал. Без shell-инъекций."""
     if how == "code":
-        subprocess.Popen(["code", path], shell=False,
+        cmd = _code_launcher()
+        if not cmd:
+            raise OSError("VS Code не найден: нет 'code' в PATH и стандартных путей установки")
+        subprocess.Popen(cmd + [path], shell=False,
                          stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
         return "VS Code"
     if how in ("terminal", "cmd", "shell"):
