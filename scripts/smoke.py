@@ -58,6 +58,13 @@ def main():
     check("GET / отдаёт визуал", status == 200 and "галактика" in body,
           f"{len(body)} байт")
 
+    import re
+    src = re.search(r'src="([^"]+)"', body)
+    check("в HTML есть <script src>", bool(src))
+    if src:
+        status_js, _ = request(src.group(1))
+        check("script src из HTML реально отдаётся", status_js == 200, src.group(1))
+
     status, body = request("/ui/galaxy.js")
     check("GET /ui/galaxy.js = 200", status == 200, f"{len(body)} байт")
 

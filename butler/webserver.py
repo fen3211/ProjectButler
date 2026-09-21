@@ -42,6 +42,13 @@ def _within(path, root) -> bool:
         return False                                   # на Windows: пути на разных дисках
 
 
+class ButlerHTTPServer(ThreadingHTTPServer):
+    """На Windows http.server разрешает двойной биндинг порта (allow_reuse_address=1).
+    Нам второй экземпляр не нужен никогда — пусть громко падает при старте."""
+    allow_reuse_address = False
+    daemon_threads = True
+
+
 class ButlerHandler(BaseHTTPRequestHandler):
     server_version = "ProjectButler/0.2"
     protocol_version = "HTTP/1.1"
@@ -97,6 +104,9 @@ class ButlerHandler(BaseHTTPRequestHandler):
         if path in ("/", "/index.html", "/ui/galaxy.html"):
             return self._static("galaxy.html")
         if path.startswith("/ui/"):
+            return self._static(os.path.basename(path))
+        if path.lstrip("/") in ("galaxy.js", "galaxy.css", "favicon.ico"):
+            # запасной маршрут: если страницу открыли не с / — относительные src не ломаются
             return self._static(os.path.basename(path))
         if path == "/galaxy.json":
             feed = read_feed(config.FEED_PATH)
@@ -166,7 +176,7 @@ def serve(root=None, port=17373, open_browser=True):
     if not os.path.isdir(root):
         raise SystemExit(f"butler: папка не найдена: {root}")
     config.remember_root(root)
-    httpd = ThreadingHTTPServer(("127.0.0.1", port), ButlerHandler)
+    httpd = ButlerHTTPServer(("127.0.0.1", port), ButlerHandler)
     httpd.butler_root = root
     url = f"http://127.0.0.1:{port}/"
     print(f"Project Butler UI: {url}\nкорень: {root}\nфид: {config.FEED_PATH}\nCtrl+C — стоп.")
