@@ -8,3 +8,7 @@ node_modules/
 report_*.md
 .DS_Store
 Thumbs.db
+
+# в репе только кадры для README, остальные скрины — локальный балласт
+design/shots/*
+!design/shots/readme-*.png
