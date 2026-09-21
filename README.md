@@ -1,5 +1,116 @@
 # Project Butler
 
-Локальный пилот по папке с проектами. Видит все проекты, говорит что живо / что сгнило, умеет воскрешать одной кнопкой. Всё локально.
+Локальный пилот по папке с проектами. Видит все проекты, считает здоровье (0–100),
+находит TODO и чтение env в коде, отдаёт всё через CLI, MCP и «галактику проектов»
+в браузере. **Ноль зависимостей** — только стандартная библиотека Python 3.12.
+Всё локально, ничего в облако не отправляет. Windows-first.
+
+## Возможности
+
+| Фича | Что делает |
+|---|---|
+| Сканер | обход папки, детекторы python / node / csharp / go / docker / git, вложенные корни |
+| Health-score | штрафы (нет README / нет git / env без `.env.example` / протухшие зависимости / не установлено) и бонусы (тесты, CI, lock) |
+| Статусы | `alive` / `abandoned` (>180 дней) / `broken` (<40 баллов) / `unknown` (пусто) |
+| TODO-грепер | TODO/FIXME/HACK/XXX/BUG с файлом и строкой, с игнором `node_modules`, `.venv` и т.д. |
+| Галактика | браузерный 3D-визуал: кластеры по стеку, свечение по score, ринг — по статусу; клик открывает папку |
+| MCP-сервер | 8 инструментов для Claude / Cline по stdio (без SDK) |
+| sqlite-база | `~/.project-butler/butler.db`, миграции без потери данных |
+
+## Быстрый старт
+
+```bat
+cd D:\Projects\ProjectButler
+run.bat                      :: скан D:\Projects + открыть галактику
+```
+
+или по шагам:
+
+```bat
+py -3.12 -m butler scan D:\Projects       :: скан -> sqlite
+py -3.12 -m butler report                 :: таблица «сначала сгнившее»
+py -3.12 -m butler todos --tag FIXME      :: хвосты по коду
+py -3.12 -m butler export                 :: фид galaxy.json
+py -3.12 -m butler ui                     :: http://127.0.0.1:17373
+py -3.12 -m butler mcp                    :: MCP-сервер по stdio
+```
+
+Корень по умолчанию берётся из аргумента → `BUTLER_ROOT` → `~/.project-butler/config.json` → `D:\Projects`.
+
+## Галактика проектов (UI)
+
+`python -m butler ui` поднимает сервер только на `127.0.0.1`:
+
+- небулы — кластеры по стеку (python / node / csharp / go / docker / js)
+- яркость и размер звезды — health-score, число TODO увеличивает точку
+- рыжий/красный ринг вокруг звезды — заброшенный/сломанный проект
+- клик — карточка с причинами штрафов и кнопками «Проводник / VS Code / Терминал»
+- двойной клик — сразу открыть папку в проводнике
+- `R` — пересканировать, `Esc` — сброс вида
+
+API маршруты: `GET /galaxy.json`, `GET /api/projects`, `GET /api/stacks`,
+`POST /api/scan`, `POST /api/open` (пути вне корня — 403).
+
+## MCP-сервер (Claude Desktop / Cline)
+
+Восемь инструментов: `butler_status`, `butler_list_projects`, `butler_project`,
+`butler_dead_projects`, `butler_todos`, `butler_search`, `butler_scan`, `butler_galaxy`.
+
+Конфиг — готовый пример в `mcp.config.example.json`. Для Claude Desktop его надо слить
+в `%APPDATA%\Claude\claude_desktop_config.json`, для Cline — в `cline_mcp_settings.json`:
+
+```json
+{
+  "mcpServers": {
+    "project-butler": {
+      "command": "py",
+      "args": ["-3.12", "-m", "butler", "mcp"],
+      "cwd": "D:\\Projects\\ProjectButler",
+      "env": { "BUTLER_ROOT": "D:\\Projects", "PYTHONIOENCODING": "utf-8" }
+    }
+  }
+}
+```
+
+Сервер реализован на чистом stdio-JSON-RPC без MCP SDK: протокол маленький,
+а зависимостей в проекте — ноль.
+
+## Тесты
+
+```bat
+py -3.12 -m unittest discover -s tests -v   :: 23 юнит-теста, включая MCP-хендшейк
+py -3.12 scripts\smoke.py D:\Projects       :: e2e: сервер + API, открытие папок под заглушкой
+```
+
+## Структура
+
+```
+butler/
+  scanner.py      # обход папок + детекторы + источник активности
+  health.py       # score 0-100, статусы, выбор главного стека по весу маркеров
+  source_scan.py  # один проход: TODO-маркеры, чтение env, свежесть файлов
+  todos.py        # фильтры и вывод TODO
+  index.py        # фид galaxy.json: детерминированная раскладка, сводки, отчёт
+  store.py        # sqlite: именованные колонки + ALTER-миграции
+  mcp_server.py   # MCP по stdio (JSON-RPC 2.0), 8 инструментов
+  webserver.py    # http://127.0.0.1:17373, статика ui/, мини-API
+  config.py       # корни сканирования, ~/.project-butler/config.json
+  detectors/      # python / node / docker / git / csharp / go
+ui/
+  galaxy.html     # тёмная тема, HUD, панель проекта
+  galaxy.js       # Canvas 2D + ручная 3D-проекция (без Three.js и CDN)
+tests/test_butler.py
+scripts/smoke.py
+mcp.config.example.json
+run.bat
+```
+
+## Дальше
+
+- [ ] День 2 по PLAN: `pip check` / `npm ls` в режиме «доктор» (только чтение)
+- [ ] Теги и заметки пользователя к проектам
+- [ ] Resurrect: `.venv` в песочнице + генерация `.env.example` из чтения env
+- [ ] История score во времени (график в галактике)
 
 Подробности — в [PLAN.md](PLAN.md).
+

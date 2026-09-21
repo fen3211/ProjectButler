@@ -90,12 +90,12 @@ D:\Projects\ProjectButler\
 - [x] `butler/store.py` (sqlite `~/.project-butler/butler.db`)
 - [x] `python -m butler scan` работает на реальных папках (7/8 стеков верно, WebPortfolio пуст — честный unknown)
 ### День 2 — health + UI
-- [ ] `health.py` + `todos.py`
-- [ ] минимальный `ui/index.html`: список, карточка, поиск
+- [x] `health.py` + `todos.py` (score 0-100, статусы alive/abandoned/broken/unknown, TODO-грепер с игнором vendor-папок)
+- [x] минимальный UI: вместо статичного `index.html` сделана «галактика проектов» (`ui/galaxy.html` + `ui/galaxy.js`, Canvas 2D + ручная 3D-проекция, без CDN)
 ### День 3 — действия
-- [ ] Открыть в VSCode / папке / терминале
+- [x] Открыть в VSCode / папке / терминале (кнопки в карточке галактики, `POST /api/open` с guard по корню)
 - [ ] Теги + заметки
-- [ ] `run.bat`, иконка в трее (опционально)
+- [x] `run.bat`, иконка в трее (опционально) — трей не делали, run.bat есть
 
 ## 7. Проверка готовности (definition of done MVP 0.1)
 - [ ] Скан `D:\Projects` находит GostChecker, AIAgent, FreelanceBot и др.
@@ -107,3 +107,5 @@ D:\Projects\ProjectButler\
 ## 8. Текущий статус
 - 2026-09-13: создана папка, написан PLAN.md, git init, приватный репо https://github.com/fen3211/ProjectButler засинхронен (ветка main). Следующее: scaffold сканера (День 1).
 - 2026-09-14: День 1 готов — сканер + 7 детекторов + sqlite + CLI scan/list, проверка на D:\Projects (7/8 верно). Следующее: День 2 (health.py + todos.py + UI).
+- 2026-09-14: ревью Day-1 — 5 фиксов (краш на битом package.json, понятная ошибка + exit 2 на плохой папке, norm_root против дублей в базе, пропуск симлинков/джанкшенов, затирание паролей в pip-URL); самотест 5/5 PASS.
+- 2026-09-21: День 2–3 + сверх плана: `health.py` (штрафы/бонусы, статусы), `source_scan.py` (TODO + чтение env + последняя активность из git index/refs), `index.py` (фид galaxy.json, детерминированная раскладка), `store.py` (именованные колонки + ALTER-миграции), `mcp_server.py` (stdio-JSON-RPC без SDK, 8 инструментов), `webserver.py` (только 127.0.0.1, `/api/open` с guard), UI «галактика» (тёмная тема, кластеры, карточка, фильтры). CLI: scan/list/report/todos/export/ui/mcp. 23 юнит-теста + `scripts/smoke.py` (e2e) — зелёные. Баг по ходу: позиционный INSERT без имён колонок ломался на ALTER-миграции — переведён на именованный INSERT; `_within` отклоняет пустой путь и чужие диски.

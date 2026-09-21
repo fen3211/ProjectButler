@@ -1,4 +1,8 @@
 """Детектор Python-проектов по файлам-маркерам (только чтение)."""
+import re
+
+# pip-ссылки вида https://user:pass@host — пароль в базу не пишем
+_AUTH_IN_URL = re.compile(r"(https?://)[^/\s@]+@")
 
 MARKERS = {"requirements.txt", "pyproject.toml", "setup.py", "setup.cfg", "Pipfile", "poetry.lock"}
 ENTRY_POINTS = ("main.py", "app.py", "bot.py", "manage.py", "run.py")
@@ -18,7 +22,7 @@ def detect(path, entries):
             text = req.read_text(encoding="utf-8", errors="ignore")
         except OSError:
             text = ""
-        facts["deps"] = [l.strip() for l in text.splitlines()
+        facts["deps"] = [_AUTH_IN_URL.sub(r"\1***@", l.strip()) for l in text.splitlines()
                          if l.strip() and not l.strip().startswith("#")]
     for ep in ENTRY_POINTS:
         if ep in names:

@@ -11,9 +11,13 @@ def detect(path, entries):
         pkg = json.loads((path / "package.json").read_text(encoding="utf-8", errors="ignore"))
     except (OSError, ValueError):
         return facts
+    if not isinstance(pkg, dict):
+        return facts
     facts["pkg_name"] = pkg.get("name", "?")
-    facts["deps_count"] = len(pkg.get("dependencies") or {})
-    facts["scripts"] = sorted((pkg.get("scripts") or {}).keys())
+    deps = pkg.get("dependencies")
+    facts["deps_count"] = len(deps) if isinstance(deps, dict) else 0
+    scripts = pkg.get("scripts")
+    facts["scripts"] = sorted(scripts.keys()) if isinstance(scripts, dict) else []
     dirs = {e.name for e in entries if e.is_dir()}
     facts["has_node_modules"] = "node_modules" in dirs
     return facts

@@ -1,0 +1,13 @@
+{
+  "mcpServers": {
+    "project-butler": {
+      "command": "py",
+      "args": ["-3.12", "-m", "butler", "mcp"],
+      "cwd": "D:\\Projects\\ProjectButler",
+      "env": {
+        "BUTLER_ROOT": "D:\\Projects",
+        "PYTHONIOENCODING": "utf-8"
+      }
+    }
+  }
+}

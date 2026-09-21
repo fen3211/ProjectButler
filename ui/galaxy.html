@@ -1,0 +1,131 @@
+<!DOCTYPE html>
+<html lang="ru">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Project Butler — галактика проектов</title>
+<style>
+  :root {
+    --bg-0: #05060a;
+    --panel: rgba(13, 18, 30, 0.82);
+    --panel-border: rgba(120, 160, 255, 0.16);
+    --text: #e8eefc;
+    --text-dim: #93a4c4;
+    --text-mute: #61708c;
+    --accent: #7dd3fc;
+    --alive: #4ade80;
+    --abandoned: #fbbf24;
+    --broken: #f87171;
+    --unknown: #6b7a99;
+    --radius: 12px;
+    --s1: 4px; --s2: 8px; --s3: 12px; --s4: 16px; --s6: 24px;
+    --shadow: 0 12px 32px rgba(0, 0, 0, 0.45);
+  }
+  * { box-sizing: border-box; }
+  html, body { height: 100%; margin: 0; }
+  body {
+    background: radial-gradient(1200px 800px at 30% 20%, #0d1424 0%, var(--bg-0) 70%);
+    color: var(--text);
+    font: 14px/1.45 "Segoe UI", Roboto, system-ui, -apple-system, sans-serif;
+    overflow: hidden;
+  }
+  #sky { position: fixed; inset: 0; display: block; cursor: grab; }
+  #sky.dragging { cursor: grabbing; }
+  .hud { position: fixed; pointer-events: none; display: flex; flex-direction: column; gap: var(--s3); }
+  .hud.top-left { top: var(--s6); left: var(--s6); max-width: 44ch; }
+  .hud.bottom-left { bottom: var(--s6); left: var(--s6); }
+  .card {
+    pointer-events: auto; background: var(--panel); border: 1px solid var(--panel-border);
+    border-radius: var(--radius); backdrop-filter: blur(10px);
+    box-shadow: var(--shadow); padding: var(--s4);
+  }
+  h1 { margin: 0 0 var(--s2); font-size: 17px; letter-spacing: .02em; font-weight: 600; }
+  h1 span { color: var(--accent); }
+  .sub { color: var(--text-dim); font-size: 12px; word-break: break-all; }
+  .stats { display: flex; flex-wrap: wrap; gap: var(--s4); margin-top: var(--s3); }
+  .stat { min-width: 72px; }
+  .stat b { display: block; font-size: 22px; font-variant-numeric: tabular-nums; line-height: 1.1; }
+  .stat small { color: var(--text-mute); text-transform: uppercase; font-size: 10px; letter-spacing: .08em; }
+  .chips { display: flex; flex-wrap: wrap; gap: var(--s2); margin-top: var(--s3); }
+  .chip {
+    pointer-events: auto; cursor: pointer; display: inline-flex; align-items: center; gap: var(--s2);
+    padding: var(--s1) var(--s3); border-radius: 999px; border: 1px solid var(--panel-border);
+    background: rgba(255,255,255,.03); color: var(--text-dim); font-size: 12px;
+    transition: border-color 120ms ease, color 120ms ease, background 120ms ease;
+  }
+  .chip:hover { color: var(--text); border-color: rgba(125,211,252,.45); }
+  .chip[aria-pressed="true"] { color: #04121c; background: var(--accent); border-color: var(--accent); font-weight: 600; }
+  .dot { width: 8px; height: 8px; border-radius: 50%; background: currentColor; }
+  .legend { display: grid; grid-template-columns: repeat(2, minmax(96px, 1fr)); gap: var(--s2) var(--s4); }
+  .legend div { display: flex; align-items: center; gap: var(--s2); color: var(--text-dim); font-size: 12px; }
+  .legend i { width: 10px; height: 10px; border-radius: 3px; display: inline-block; }
+  #panel {
+    position: fixed; top: var(--s6); right: var(--s6); width: 360px;
+    transform: translateX(120%); transition: transform 180ms cubic-bezier(.2,.8,.2,1);
+    max-height: calc(100vh - 96px); overflow: auto;
+  }
+  #panel.open { transform: translateX(0); }
+  #panel h2 { margin: 0 0 var(--s1); font-size: 18px; }
+  #panel .tagline { color: var(--text-dim); font-size: 12px; margin-bottom: var(--s3); }
+  .row { display: flex; justify-content: space-between; gap: var(--s3); padding: var(--s1) 0; font-size: 13px; }
+  .row span:first-child { color: var(--text-mute); }
+  .meter { height: 6px; border-radius: 3px; background: rgba(255,255,255,.08); overflow: hidden; margin: var(--s3) 0 var(--s1); }
+  .meter > i { display: block; height: 100%; background: var(--accent); }
+  .why { list-style: none; margin: var(--s3) 0 0; padding: 0; }
+  .why li { color: var(--text-dim); font-size: 12px; padding-left: var(--s4); position: relative; }
+  .why li::before { content: "▸"; position: absolute; left: var(--s1); color: var(--broken); }
+  .why.bonus li::before { content: "+"; color: var(--alive); }
+  .actions { display: flex; flex-wrap: wrap; gap: var(--s2); margin-top: var(--s4); }
+  button {
+    font: inherit; font-size: 13px; cursor: pointer; padding: var(--s2) var(--s3);
+    border-radius: 8px; border: 1px solid var(--panel-border);
+    background: rgba(255,255,255,.04); color: var(--text);
+    transition: background 120ms ease, border-color 120ms ease, transform 60ms ease;
+  }
+  button:hover { background: rgba(125,211,252,.14); border-color: rgba(125,211,252,.45); }
+  button:active { transform: translateY(1px); }
+  button[disabled] { opacity: .45; cursor: not-allowed; }
+  #tip {
+    position: fixed; pointer-events: none; opacity: 0; transform: translate(-50%, -140%);
+    background: rgba(8,12,20,.92); border: 1px solid var(--panel-border); border-radius: 8px;
+    padding: var(--s2) var(--s3); font-size: 12px; transition: opacity 90ms ease; max-width: 32ch;
+  }
+  #tip small { display: block; color: var(--text-mute); font-size: 11px; }
+  #status { position: fixed; left: 50%; bottom: var(--s6); transform: translateX(-50%); color: var(--text-mute); font-size: 12px; }
+  kbd { background: rgba(255,255,255,.06); border: 1px solid var(--panel-border); border-radius: 4px; padding: 0 var(--s1); font-size: 11px; }
+  #error {
+    position: fixed; inset: auto 0 40% 0; margin: 0 auto; width: max-content; max-width: 80vw;
+    padding: var(--s4); border-radius: var(--radius); background: rgba(60,14,20,.92);
+    border: 1px solid rgba(248,113,113,.5); display: none;
+  }
+</style>
+</head>
+<body>
+<canvas id="sky"></canvas>
+
+<div class="hud top-left">
+  <div class="card">
+    <h1>Project Butler <span>// галактика проектов</span></h1>
+    <div class="sub" id="root">загрузка…</div>
+    <div class="stats" id="stats"></div>
+    <div class="chips" id="chips"></div>
+  </div>
+  <div class="legend" id="legend"></div>
+</div>
+
+<div id="panel" class="card"></div>
+
+<div class="hud bottom-left">
+  <div class="card" style="padding:12px 16px">
+    <div class="sub">мышь — вращать · колесо — зум · клик — карточка · двойной клик — открыть папку ·
+      <kbd>R</kbd> — пересканировать · <kbd>Esc</kbd> — сброс вида</div>
+  </div>
+</div>
+
+<div id="tip"></div>
+<div id="status">инициализация…</div>
+<div id="error" class="card"></div>
+
+<script src="galaxy.js"></script>
+</body>
+</html>
