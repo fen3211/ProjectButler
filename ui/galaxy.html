@@ -38,8 +38,10 @@
     --input-bg: rgba(220, 235, 255, .06);
     --input-hover: rgba(220, 235, 255, .10);
   }
+  /* hue-rotate дописывается К блюру, а не вместо: без blur(60px) край
+     туманности-круга становится резким (см. скрин с «резким кругом») */
   body[data-theme="deepspace"] #cosmos .n1,
-  body[data-theme="deepspace"] #cosmos .n2 { filter: hue-rotate(-38deg) saturate(1.15); }
+  body[data-theme="deepspace"] #cosmos .n2 { filter: blur(60px) hue-rotate(-38deg) saturate(1.15); }
   body[data-theme="mars"] {
     --accent: #ffab6e; --accent2: #ffd479;
     --bg: #0a0402;
@@ -51,8 +53,8 @@
     --input-hover: rgba(255, 235, 220, .10);
   }
   body[data-theme="mars"] #cosmos .n1,
-  body[data-theme="mars"] #cosmos .n3 { filter: hue-rotate(148deg) saturate(1.2); }
-  body[data-theme="mars"] #cosmos .n2 { filter: hue-rotate(120deg) saturate(.9); }
+  body[data-theme="mars"] #cosmos .n3 { filter: blur(60px) hue-rotate(148deg) saturate(1.2); }
+  body[data-theme="mars"] #cosmos .n2 { filter: blur(60px) hue-rotate(120deg) saturate(.9); }
   body[data-theme="observatory"] {
     --bg: #f4f2ec;
     --txt: #1c2233;
