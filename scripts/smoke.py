@@ -111,6 +111,25 @@ def main():
     check("GET /api/feed-version = mtime фида", status == 200 and data.get("mtime", 0) > 0,
           str(data.get("mtime")))
 
+    status, body = request("/api/settings")
+    data = json.loads(body) if status == 200 else {}
+    check("GET /api/settings = дефолты", status == 200 and "theme" in data and "lang" in data,
+          str(data.get("theme")))
+    status, body = request("/api/settings", "POST", {"theme": "deepspace", "lang": "en", "hack": 1})
+    data = json.loads(body) if status == 200 else {}
+    check("POST /api/settings сохраняет и валидирует", status == 200 and
+          data.get("theme") == "deepspace" and data.get("lang") == "en" and "hack" not in data,
+          str(data.get("theme")))
+    request("/api/settings", "POST", {"theme": "darkmatter", "lang": "ru"})
+
+    status, body = request("/api/gh/status")
+    data = json.loads(body) if status == 200 else {}
+    check("GET /api/gh/status без токена = не авторизован", status == 200 and
+          data.get("authed") is False, str(data.get("authed")))
+
+    status, body = request("/api/gh/repo?path=" + quote(r"C:\Windows"))
+    check("GET /api/gh/repo вне корня = 403", status == 403, body[:80])
+
     status, body = request("/api/search?q=" + quote("Проект"))
     data = json.loads(body) if status == 200 else {}
     check("GET /api/search ищет по содержимому", status == 200 and isinstance(data.get("results"), list),

@@ -16,7 +16,7 @@ PROJECT_DIR = Path(__file__).resolve().parent.parent
 if str(PROJECT_DIR) not in sys.path:
     sys.path.insert(0, str(PROJECT_DIR))
 
-from butler import health, index, store            # noqa: E402
+from butler import config, health, index, store            # noqa: E402
 from butler.scanner import scan                    # noqa: E402
 from butler.source_scan import scan_sources        # noqa: E402
 from butler.todos import count_by_tag, format_todos  # noqa: E402
@@ -667,6 +667,53 @@ class ReadmeGenTest(unittest.TestCase):
         self.assertIn("- requests", text)
         self.assertIn("py -3.12 app.py", text)
         self.assertIn("TODO", text)
+
+
+class GitHubTest(unittest.TestCase):
+    """parse_remote: https/ssh/хвосты; валидация настроек без сети."""
+
+    def test_parse_remote_variants(self):
+        from butler import github
+        self.assertEqual(github.parse_remote("https://github.com/fen/Proj.git"), "fen/Proj")
+        self.assertEqual(github.parse_remote("https://github.com/fen/Proj"), "fen/Proj")
+        self.assertEqual(github.parse_remote("git@github.com:fen/Proj.git"), "fen/Proj")
+        self.assertEqual(github.parse_remote("git@gitlab.com:fen/Proj.git"), "")
+        self.assertEqual(github.parse_remote(""), "")
+
+    def test_token_storage(self):
+        from butler import github
+        import tempfile as _tf
+        with _tf.TemporaryDirectory() as tmp, \
+             mock.patch.object(github, "TOKEN_PATH", Path(tmp) / "gh.token"):
+            self.assertEqual(github.get_token(), "")
+            github.save_token("  abc123  ")
+            self.assertEqual(github.get_token(), "abc123")
+            github.clear_token()
+            self.assertEqual(github.get_token(), "")
+
+
+class SettingsTest(unittest.TestCase):
+    """Настройки UI: тема/язык валидируются, чужие ключи не проходят."""
+
+    def setUp(self):
+        self.tmp = tempfile.TemporaryDirectory()
+
+    def tearDown(self):
+        self.tmp.cleanup()
+
+    def test_roundtrip_and_validation(self):
+        with mock.patch.object(config, "SETTINGS_PATH", Path(self.tmp.name) / "settings.json"):
+            self.assertEqual(config.load_settings()["theme"], "darkmatter")
+            saved = config.save_settings({"theme": "mars", "lang": "en",
+                                          "custom": {"accent": "#ff0000"}, "hack": True})
+            self.assertEqual(saved["theme"], "mars")
+            self.assertEqual(saved["lang"], "en")
+            self.assertEqual(saved["custom"], {"accent": "#ff0000"})
+            self.assertNotIn("hack", saved)
+            self.assertEqual(config.load_settings(), saved)
+            bad = config.save_settings({"theme": "neon", "lang": "de"})
+            self.assertEqual(bad["theme"], "darkmatter")
+            self.assertEqual(bad["lang"], "ru")
 
 
 if __name__ == "__main__":

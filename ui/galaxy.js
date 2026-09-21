@@ -24,7 +24,149 @@ const state = {
   spin: null, lastAction: 0, cosmosStill: false,
   query: '', prev: {}, fx: [], warpT0: 0,
   meta: {}, contentHits: new Set(), tagFilter: new Set(), feedMtime: 0,
+  settings: { theme: 'darkmatter', lang: 'ru', custom: {} }, palette: null,
 };
+
+/* палитры тем для канваса: пыль, туманности, акценты */
+const CANVAS_THEMES = {
+  darkmatter:  { dust: '#cfd8ff', warm: '157,140,255', cool: '110,231,255', accent: '#9d8cff', accent2: '#6ee7ff' },
+  deepspace:   { dust: '#bfd4ff', warm: '90,150,255',  cool: '70,225,205',  accent: '#6ea8ff', accent2: '#4de3d0' },
+  mars:        { dust: '#ffe0c8', warm: '255,150,90',  cool: '255,205,120', accent: '#ffab6e', accent2: '#ffd479' },
+  observatory: { dust: '#5a6480', warm: '120,100,220', cool: '20,140,165',  accent: '#6d4fd4', accent2: '#0e8fa8' },
+};
+
+function hexToRgb(hex) {
+  const m = /^#?([0-9a-f]{6})$/i.exec(String(hex || '').trim());
+  if (!m) return '';
+  const n = parseInt(m[1], 16);
+  return (n >> 16) + ',' + ((n >> 8) & 255) + ',' + (n & 255);
+}
+
+function accentColor() {
+  return (state.palette && state.palette.accent) || ACCENT;
+}
+
+/* ---------- i18n: ru / en для видимых поверхностей UI ---------- */
+
+const I18N = {
+  ru: {
+    digest_btn: 'дайджест', browse_btn: 'обзор', scan_btn: 'скан',
+    search_ph: '⌕  поиск — /',
+    keys_html: 'мышь — вращать · колесо — зум · клик — карточка · двойной клик — папка · <kbd>/</kbd> — поиск · <kbd>R</kbd> — рескан · <kbd>Esc</kbd> — сброс',
+    st_alive: 'живой', st_abandoned: 'заброшен', st_broken: 'сломан', st_unknown: 'пусто',
+    idle_word: 'простой',
+    kick: 'проект', f_stack: 'стек', f_idle: 'простой', f_branch: 'ветка',
+    f_deps: 'зависимости', f_todos: 'TODO', f_weight: 'вес на диске', f_readme: 'README',
+    yes: 'есть', no: 'нет',
+    b_folder: 'Папка', b_terminal: 'Терминал', b_run: 'Запустить', b_stop: 'Остановить',
+    b_res: 'Воскресить', b_doctor: 'Диагностика', b_readme: 'Сгенерировать README',
+    b_copy: 'Копировать путь', b_git: 'Создать git', clean_btn: 'снести',
+    tag_ph: '+ тег',
+    note_ph: 'заметка: что это, почему забросил, что доделать…',
+    p_title: 'папка сканирования', p_mycomp: 'мой компьютер — выбери диск',
+    p_reading: 'читаю…', p_none: 'подпапок не видно — можно сканировать эту или подняться выше',
+    p_up: '↑ выше', p_scan: 'сканировать эту папку',
+    d_title: 'дайджест · что изменилось',
+    d_nothing: 'тишь да гладь — ничего не изменилось',
+    d_born: 'родились', d_left: 'ушли',
+    d_need2: 'нужен второй скан — сравнивать пока не с чем',
+    d_projects: 'проектов', d_junk: 'мусора', d_secrets: 'секретов',
+    rescan_pill: '↻ пересканировать', cosmos_on: '✦ космос: вкл', cosmos_off: '✦ космос: выкл',
+    busy_scan: 'скан уже идёт — дай ему доработать', rescan_start: 'запускаю рескан…',
+    feed_reading: 'читаю фид…', ready: 'готово: ', feed_from: 'фид от',
+    fail_data: 'Не удалось получить данные: ', fail_server_hint: 'Сервер поднят командой `python -m butler ui`.',
+    settings: 'настройки',
+    set_theme: 'тема', th_darkmatter: 'Тёмная материя', th_deepspace: 'Глубокий космос',
+    th_mars: 'Закат на Марсе', th_observatory: 'Обсерватория', th_custom: 'Свой стиль',
+    set_lang: 'язык / language', set_colors: 'свой стиль: акцент, второй, фон, пыль',
+    save_custom: 'сохранить свой стиль', set_gh: 'github',
+    gh_token_ph: 'Personal Access Token с правами repo',
+    gh_login: 'войти', gh_logout: 'выйти',
+    gh_howto: 'Токен создаётся на github.com/settings/tokens (права repo). Хранится только у тебя.',
+    gh_publish: 'Опубликовать на GitHub', gh_private: 'приватный',
+    gh_settings: 'настройки репозитория', gh_release: 'Создать релиз',
+    gh_tag_ph: 'тег, напр. v1.0.0', gh_name_ph: 'название релиза (опционально)',
+    gh_body_ph: 'что в релизе', gh_desc_ph: 'описание репозитория', gh_save: 'сохранить',
+    gh_open: 'открыть на GitHub', gh_no_git: 'нет git — сначала «Создать git»',
+    gh_no_auth: 'вход через GitHub — в настройках (⚙)',
+    runlog_run: 'лог запуска · ', runlog_done: 'процесс завершён (код ', runlog_quiet: 'пока тихо…',
+    res_kick: 'воскрешение · ', kick_diag: 'диагностика', junk_kick: 'мусор на диске · ',
+    hist: 'история score', hist_last: 'последние', hist_scans: 'сканов',
+    hist_none: 'появится после второго скана', runlog_head_idle: 'диагностика',
+  },
+  en: {
+    digest_btn: 'digest', browse_btn: 'browse', scan_btn: 'scan',
+    search_ph: '⌕  search — /',
+    keys_html: 'drag — orbit · wheel — zoom · click — card · double click — folder · <kbd>/</kbd> — search · <kbd>R</kbd> — rescan · <kbd>Esc</kbd> — reset',
+    st_alive: 'alive', st_abandoned: 'abandoned', st_broken: 'broken', st_unknown: 'empty',
+    idle_word: 'idle',
+    kick: 'project', f_stack: 'stack', f_idle: 'idle', f_branch: 'branch',
+    f_deps: 'deps', f_todos: 'TODOs', f_weight: 'disk weight', f_readme: 'README',
+    yes: 'yes', no: 'none',
+    b_folder: 'Folder', b_terminal: 'Terminal', b_run: 'Run', b_stop: 'Stop',
+    b_res: 'Resurrect', b_doctor: 'Diagnose', b_readme: 'Generate README',
+    b_copy: 'Copy path', b_git: 'Create git', clean_btn: 'purge',
+    tag_ph: '+ tag',
+    note_ph: 'note: what is this, why abandoned, what to finish…',
+    p_title: 'scan folder', p_mycomp: 'my computer — pick a drive',
+    p_reading: 'reading…', p_none: 'no subfolders visible — scan this one or go up',
+    p_up: '↑ up', p_scan: 'scan this folder',
+    d_title: 'digest · what changed',
+    d_nothing: 'all quiet — nothing changed',
+    d_born: 'born', d_left: 'gone',
+    d_need2: 'need a second scan to compare',
+    d_projects: 'projects', d_junk: 'junk', d_secrets: 'secrets',
+    rescan_pill: '↻ rescan', cosmos_on: '✦ cosmos: on', cosmos_off: '✦ cosmos: off',
+    busy_scan: 'scan already running — let it finish', rescan_start: 'starting rescan…',
+    feed_reading: 'reading feed…', ready: 'ready: ', feed_from: 'feed from',
+    fail_data: 'Failed to fetch data: ', fail_server_hint: 'server is started by `python -m butler ui`.',
+    settings: 'settings',
+    set_theme: 'theme', th_darkmatter: 'Dark matter', th_deepspace: 'Deep space',
+    th_mars: 'Mars sunset', th_observatory: 'Observatory', th_custom: 'Custom',
+    set_lang: 'язык / language', set_colors: 'custom: accent, secondary, background, dust',
+    save_custom: 'save custom style', set_gh: 'github',
+    gh_token_ph: 'Personal Access Token with repo scope',
+    gh_login: 'sign in', gh_logout: 'sign out',
+    gh_howto: 'Create a token at github.com/settings/tokens (repo scope). Stored locally only.',
+    gh_publish: 'Publish to GitHub', gh_private: 'private',
+    gh_settings: 'repo settings', gh_release: 'Create release',
+    gh_tag_ph: 'tag, e.g. v1.0.0', gh_name_ph: 'release title (optional)',
+    gh_body_ph: 'release notes', gh_desc_ph: 'repo description', gh_save: 'save',
+    gh_open: 'open on GitHub', gh_no_git: 'no git — use «Create git» first',
+    gh_no_auth: 'GitHub sign-in — in settings (⚙)',
+    runlog_run: 'run log · ', runlog_done: 'process finished (code ', runlog_quiet: 'quiet so far…',
+    res_kick: 'resurrect · ', kick_diag: 'diagnostics', junk_kick: 'junk on disk · ',
+    hist: 'score history', hist_last: 'last', hist_scans: 'scans',
+    hist_none: 'appears after second scan', runlog_head_idle: 'diagnostics',
+  },
+};
+
+function t(key) {
+  const d = I18N[state.lang] || I18N.ru;
+  return d[key] !== undefined ? d[key] : (I18N.ru[key] !== undefined ? I18N.ru[key] : key);
+}
+
+function statusLabel(status) {
+  return t('st_' + status);
+}
+
+function applyLang() {
+  const pairs = [[ui.digestBtn, 'digest_btn'], [ui.browseBtn, 'browse_btn'],
+                 [ui.rootApply, 'scan_btn']];
+  pairs.forEach(([el, key]) => { if (el) el.textContent = t(key); });
+  if (ui.search) ui.search.placeholder = t('search_ph');
+  const keys = document.querySelector('.keys');
+  if (keys) keys.innerHTML = t('keys_html');
+  if (ui.setKick) ui.setKick.textContent = t('settings');
+  const pk = document.getElementById('pickKick');
+  if (pk) pk.textContent = t('p_title');
+  const up = document.getElementById('pickUp');
+  if (up) up.textContent = t('p_up');
+  const ps = document.getElementById('pickScan');
+  if (ps) ps.textContent = t('p_scan');
+  const dk = document.querySelector('#digest .pkick');
+  if (dk) dk.textContent = t('d_title');
+}
 
 const canvas = document.getElementById('sky');
 const ctx = canvas.getContext('2d');
@@ -47,6 +189,12 @@ const ui = {
   digestBody: document.getElementById('digestBody'),
   digestClose: document.getElementById('digestClose'),
   digestBtn: document.getElementById('digestBtn'),
+  settingsBtn: document.getElementById('settingsBtn'),
+  settingsPanel: document.getElementById('settingsPanel'),
+  settingsBody: document.getElementById('settingsBody'),
+  setClose: document.getElementById('setClose'),
+  setKick: document.getElementById('setKick'),
+  setGhLine: document.getElementById('setGhLine'),
 };
 
 /* ---------- пикер папок ---------- */
@@ -85,8 +233,8 @@ function scanFrom(path) {
 async function browse(path) {
   picker.current = path;
   picker.parent = null;
-  picker.pathEl.textContent = path || 'мой компьютер — выбери диск';
-  picker.list.innerHTML = '<div class="pempty">читаю…</div>';
+  picker.pathEl.textContent = path || t('p_mycomp');
+  picker.list.innerHTML = '<div class="pempty">' + t('p_reading') + '</div>';
   try {
     const data = await api('/api/browse?path=' + encodeURIComponent(path));
     renderBrowse(data);
@@ -114,7 +262,7 @@ function renderBrowse(data) {
   if (!data.dirs.length) {
     const empty = document.createElement('div');
     empty.className = 'pempty';
-    empty.textContent = 'подпапок не видно — можно сканировать эту или подняться выше';
+    empty.textContent = t('p_none');
     picker.list.append(empty);
   }
   data.dirs.forEach((name) => {
@@ -199,18 +347,18 @@ function digestChips(names, cls) {
 function renderDigest(data) {
   const d = data.diff || {};
   const human = humanBytes(data.junk_bytes || 0);
-  ui.digestMeta.textContent = data.root + ' · ' + data.projects + ' проектов · ' +
-    human + ' мусора · ' + data.secrets + ' секретов · ' + data.todos + ' TODO';
+  ui.digestMeta.textContent = data.root + ' · ' + data.projects + ' ' + t('d_projects') + ' · ' +
+    human + ' ' + t('d_junk') + ' · ' + data.secrets + ' ' + t('d_secrets') + ' · ' + data.todos + ' TODO';
   const rows = [];
   if (d.scans < 2) {
-    rows.push('<div class="pempty">нужен второй скан — сравнивать пока не с чем</div>');
+    rows.push('<div class="pempty">' + t('d_need2') + '</div>');
   } else {
     if (d.added && d.added.length) {
-      rows.push('<div class="kick" style="margin-top:6px">родились (' + d.added.length + ')</div>');
+      rows.push('<div class="kick" style="margin-top:6px">' + t('d_born') + ' (' + d.added.length + ')</div>');
       rows.push(digestChips(d.added, '#7ef0b2'));
     }
     if (d.removed && d.removed.length) {
-      rows.push('<div class="kick" style="margin-top:10px">ушли (' + d.removed.length + ')</div>');
+      rows.push('<div class="kick" style="margin-top:10px">' + t('d_left') + ' (' + d.removed.length + ')</div>');
       rows.push(digestChips(d.removed, '#ff7a90'));
     }
     (d.improved || []).forEach((it) => {
@@ -224,7 +372,7 @@ function renderDigest(data) {
     // пустые массивы в JS truthy — проверяем длины явно, иначе «тишь да гладь» никогда не покажется
     if (!((d.added && d.added.length) || (d.removed && d.removed.length) ||
           (d.improved && d.improved.length) || (d.worsened && d.worsened.length))) {
-      rows.push('<div class="pempty">тишь да гладь — ничего не изменилось</div>');
+      rows.push('<div class="pempty">' + t('d_nothing') + '</div>');
     }
   }
   ui.digestBody.innerHTML = rows.join('');
@@ -233,6 +381,197 @@ function renderDigest(data) {
 ui.digestClose.addEventListener('click', closeDigest);
 ui.digest.addEventListener('click', (ev) => { if (ev.target === ui.digest) closeDigest(); });
 ui.digestBtn.addEventListener('click', openDigest);
+
+/* ---------- панель настроек: темы, язык, свой стиль, GitHub ---------- */
+
+const THEME_SWATCHES = {
+  darkmatter: ['#010104', '#9d8cff', '#6ee7ff'],
+  deepspace: ['#01030a', '#6ea8ff', '#4de3d0'],
+  mars: ['#0a0402', '#ffab6e', '#ffd479'],
+  observatory: ['#f4f2ec', '#6d4fd4', '#0e8fa8'],
+  custom: ['#000000', '#ffffff', '#888888'],
+};
+
+function settingsOpen() { return ui.settingsPanel.classList.contains('open'); }
+
+function openSettings() {
+  ui.settingsPanel.classList.add('open');
+  renderSettings();
+}
+
+function closeSettings() { ui.settingsPanel.classList.remove('open'); }
+
+async function saveSettings(patch) {
+  const next = Object.assign({}, state.settings, patch);
+  try {
+    state.settings = await api('/api/settings', next);
+    applySettings(state.settings);
+    return true;
+  } catch (err) {
+    fail('settings: ' + err.message);
+    return false;
+  }
+}
+
+function renderSettings() {
+  const body = ui.settingsBody;
+  body.innerHTML = '';
+  const cur = state.settings.theme || 'darkmatter';
+  const custom = state.settings.custom || {};
+
+  const themeKick = document.createElement('div');
+  themeKick.className = 'secKick';
+  themeKick.style.borderTop = 'none';
+  themeKick.style.paddingTop = '0';
+  themeKick.textContent = t('set_theme');
+  body.append(themeKick);
+
+  const grid = document.createElement('div');
+  grid.className = 'themeGrid';
+  ['darkmatter', 'deepspace', 'mars', 'observatory', 'custom'].forEach((id) => {
+    const card = document.createElement('div');
+    card.className = 'themeCard' + (cur === id ? ' on' : '');
+    const sw = THEME_SWATCHES[id];
+    card.innerHTML = '<div class="swatch" style="background:linear-gradient(120deg,' +
+      sw[0] + ' 38%,' + sw[1] + ' 39%,' + sw[1] + ' 62%,' + sw[2] + ' 63%)"></div>' +
+      t('th_' + id);
+    card.onclick = () => saveSettings({ theme: id }).then(() => renderSettings());
+    grid.append(card);
+  });
+  body.append(grid);
+
+  if (cur === 'custom') {
+    const row = document.createElement('div');
+    row.className = 'setrow';
+    const label = document.createElement('label');
+    label.textContent = t('set_colors');
+    row.append(label);
+    const defs = [['accent', custom.accent || '#9d8cff'], ['accent2', custom.accent2 || '#6ee7ff'],
+                  ['bg', custom.bg || '#010104'], ['dust', custom.dust || '#cfd8ff']];
+    const inputs = {};
+    defs.forEach(([key, val]) => {
+      const inp = document.createElement('input');
+      inp.type = 'color';
+      inp.className = 'colorInp';
+      inp.value = val;
+      inputs[key] = inp;
+      row.append(inp);
+    });
+    const save = document.createElement('button');
+    save.className = 'langBtn';
+    save.textContent = t('save_custom');
+    save.onclick = () => {
+      const cc = {};
+      Object.entries(inputs).forEach(([k, el]) => { cc[k] = el.value; });
+      saveSettings({ custom: cc }).then(() => { renderSettings(); say('✓ ' + t('save_custom')); });
+    };
+    row.append(save);
+    body.append(row);
+  }
+
+  const langKick = document.createElement('div');
+  langKick.className = 'secKick';
+  langKick.textContent = t('set_lang');
+  body.append(langKick);
+  const langRow = document.createElement('div');
+  langRow.className = 'setrow';
+  [['ru', 'Русский'], ['en', 'English']].forEach(([code, title]) => {
+    const b = document.createElement('button');
+    b.className = 'langBtn' + ((state.lang || 'ru') === code ? ' on' : '');
+    b.textContent = title;
+    b.onclick = () => saveSettings({ lang: code }).then(() => {
+      renderLegend();
+      renderDock();
+      if (state.selected) renderPanel(state.selected);
+      renderSettings();
+    });
+    langRow.append(b);
+  });
+  body.append(langRow);
+
+  const ghKick = document.createElement('div');
+  ghKick.className = 'secKick';
+  ghKick.textContent = t('set_gh');
+  body.append(ghKick);
+  const ghBox = document.createElement('div');
+  ghBox.id = 'ghAuthBox';
+  body.append(ghBox);
+  renderGhAuth(ghBox);
+}
+
+async function renderGhAuth(box) {
+  box.innerHTML = '<div class="pempty">' + t('p_reading') + '</div>';
+  let st = { authed: false };
+  try { st = await api('/api/gh/status'); } catch (e) { /* нет сети — рисуем как есть */ }
+  box.innerHTML = '';
+  if (st.authed) {
+    const line = document.createElement('div');
+    line.className = 'ghline';
+    if (st.avatar) {
+      const img = document.createElement('img');
+      img.src = st.avatar;
+      img.alt = '';
+      line.append(img);
+    }
+    const who = document.createElement('span');
+    who.textContent = (st.name || st.login) + ' · @' + st.login;
+    line.append(who);
+    const out = document.createElement('button');
+    out.className = 'langBtn';
+    out.style.marginLeft = 'auto';
+    out.textContent = t('gh_logout');
+    out.onclick = async () => {
+      await api('/api/gh/logout', {});
+      renderGhAuth(box);
+      say('GitHub: ' + t('gh_logout'));
+    };
+    line.append(out);
+    box.append(line);
+    return;
+  }
+  if (st.stale) {
+    const warn = document.createElement('div');
+    warn.className = 'pempty';
+    warn.textContent = '⚠ ' + (st.error || '');
+    box.append(warn);
+  }
+  const row = document.createElement('div');
+  row.className = 'setrow';
+  const inp = document.createElement('input');
+  inp.className = 'searchbox';
+  inp.style.width = '300px';
+  inp.type = 'password';
+  inp.placeholder = t('gh_token_ph');
+  row.append(inp);
+  const btn = document.createElement('button');
+  btn.className = 'langBtn';
+  btn.textContent = t('gh_login');
+  btn.onclick = async () => {
+    if (!inp.value.trim()) return;
+    btn.disabled = true;
+    try {
+      const res = await api('/api/gh/login', { token: inp.value.trim() });
+      say('GitHub: ' + res.login + ' ✓');
+      renderGhAuth(box);
+    } catch (err) {
+      fail('GitHub: ' + err.message);
+      btn.disabled = false;
+    }
+  };
+  inp.addEventListener('keydown', (ev) => { if (ev.key === 'Enter') btn.click(); });
+  row.append(btn);
+  box.append(row);
+  const hint = document.createElement('div');
+  hint.className = 'pempty';
+  hint.style.textAlign = 'left';
+  hint.style.padding = '6px 2px';
+  hint.textContent = t('gh_howto');
+  box.append(hint);
+}
+
+ui.setClose.addEventListener('click', closeSettings);
+ui.settingsPanel.addEventListener('click', (ev) => { if (ev.target === ui.settingsPanel) closeSettings(); });
+ui.settingsBtn.addEventListener('click', openSettings);
 
 /* ---------- живой фид: фид сменился на диске — галактика обновляется сама ---------- */
 
@@ -277,8 +616,11 @@ async function api(path, body) {
 }
 
 async function init(rescan) {
-  if (state.scanning) { say('скан уже идёт — дай ему доработать'); return; }
-  say(rescan ? 'запускаю рескан…' : 'читаю фид…');
+  if (state.scanning) { say(t('busy_scan')); return; }
+  try {
+    applySettings(await api('/api/settings'));
+  } catch (e) { /* дефолтная тема уже применена */ }
+  say(rescan ? t('rescan_start') : t('feed_reading'));
   try {
     if (rescan) {
       const res = await api('/api/scan', {});
@@ -286,12 +628,42 @@ async function init(rescan) {
     }
     state.feed = await api('/galaxy.json');
   } catch (err) {
-    fail('Не удалось получить данные: ' + err.message + '. Сервер поднят командой `python -m butler ui`.');
+    fail(t('fail_data') + err.message + '. ' + t('fail_server_hint'));
     return;
   }
   refreshUI();
   loadRoots();
-  say('готово: ' + state.feed.projects.length + ' проектов, фид от ' + state.feed.generated_at_iso);
+  say(t('ready') + state.feed.projects.length + ', ' + t('feed_from') + ' ' + state.feed.generated_at_iso);
+}
+
+/* ---------- настройки: тема, язык, свой стиль ---------- */
+
+function applySettings(s) {
+  state.settings = s = s || {};
+  const theme = s.theme || 'darkmatter';
+  const custom = s.custom || {};
+  state.lang = s.lang || 'ru';
+  if (theme === 'custom') {
+    document.body.dataset.theme = 'darkmatter';
+    const rootStyle = document.documentElement.style;
+    if (custom.accent) rootStyle.setProperty('--accent', custom.accent);
+    if (custom.accent2) rootStyle.setProperty('--accent2', custom.accent2);
+    if (custom.bg) rootStyle.setProperty('--bg', custom.bg);
+    state.palette = {
+      dust: custom.dust || '#cfd8ff',
+      warm: hexToRgb(custom.accent) || CANVAS_THEMES.darkmatter.warm,
+      cool: hexToRgb(custom.accent2) || CANVAS_THEMES.darkmatter.cool,
+      accent: custom.accent || CANVAS_THEMES.darkmatter.accent,
+      accent2: custom.accent2 || CANVAS_THEMES.darkmatter.accent2,
+    };
+  } else {
+    document.body.dataset.theme = theme;
+    const rootStyle = document.documentElement.style;
+    ['--accent', '--accent2', '--bg'].forEach((v) => rootStyle.removeProperty(v));
+    state.palette = CANVAS_THEMES[theme] || CANVAS_THEMES.darkmatter;
+  }
+  applyLang();
+  resize();                                        // фон перестраивается в палитре темы
 }
 
 function refreshUI() {
@@ -549,7 +921,7 @@ function renderLegend() {
 
   const rescan = document.createElement('button');
   rescan.className = 'pill ghost';
-  rescan.textContent = '↻ пересканировать';
+  rescan.textContent = t('rescan_pill');
   rescan.onclick = () => init(true);
   pills.append(rescan);
 
@@ -557,7 +929,7 @@ function renderLegend() {
   cosmosBtn.className = 'pill ghost';
   cosmosBtn.setAttribute('aria-pressed', String(!motionOff()));
   cosmosBtn.title = 'анимации космоса: дрейф, дыхание, параллакс от курсора';
-  cosmosBtn.textContent = motionOff() ? '✦ космос: выкл' : '✦ космос: вкл';
+  cosmosBtn.textContent = motionOff() ? t('cosmos_off') : t('cosmos_on');
   cosmosBtn.onclick = () => {
     if (motionOff()) localStorage.removeItem('cosmos-still');
     else localStorage.setItem('cosmos-still', '1');
@@ -571,8 +943,8 @@ function renderLegend() {
 /* ---------- док проектов ---------- */
 
 function dockStatus(node) {
-  if (node.status === 'abandoned') return 'простой ' + node.idle_days + 'д';
-  return STATUS_LABELS[node.status];
+  if (node.status === 'abandoned') return t('idle_word') + ' ' + node.idle_days + 'd';
+  return statusLabel(node.status);
 }
 
 function renderDock(stagger) {
@@ -644,8 +1016,9 @@ function buildBg() {
   b.setTransform(dpr, 0, 0, dpr, 0, 0);
   const W = state.width, H = state.height;
   const rnd = mulberry32(20260921);
+  const pal = state.palette || CANVAS_THEMES.darkmatter;
 
-  b.fillStyle = '#cfd8ff';
+  b.fillStyle = pal.dust;
   for (let i = 0; i < 320; i++) {
     b.globalAlpha = rnd() * .35 + .05;
     b.beginPath();
@@ -663,10 +1036,10 @@ function buildBg() {
     b.beginPath(); b.arc(x, y, r, 0, 7); b.fill();
   }
   for (let i = 0; i < 26; i++) {
-    bokeh(rnd() * W, rnd() * H, rnd() * 42 + 14, '157,140,255', rnd() * .12 + .04);
+    bokeh(rnd() * W, rnd() * H, rnd() * 42 + 14, pal.warm, rnd() * .12 + .04);
   }
   for (let i = 0; i < 18; i++) {
-    bokeh(rnd() * W, rnd() * H, rnd() * 32 + 10, '110,231,255', rnd() * .10 + .03);
+    bokeh(rnd() * W, rnd() * H, rnd() * 32 + 10, pal.cool, rnd() * .10 + .03);
   }
   state.bg = bg;
 }
@@ -1054,7 +1427,7 @@ function showTip(star, mx, my) {
   if (!star) { ui.tip.style.opacity = '0'; return; }
   const n = star.node;
   ui.tip.innerHTML = '<b>' + esc(n.name) + '</b> · ' + n.score +
-    '<small>' + esc(n.stack) + ' · ' + STATUS_LABELS[n.status] + ' · ' +
+    '<small>' + esc(n.stack) + ' · ' + statusLabel(n.status) + ' · ' +
     (n.why[0] ? esc(n.why[0]) : 'претензий нет') + '</small>';
   ui.tip.style.left = mx + 'px';
   ui.tip.style.top = my + 'px';
@@ -1090,9 +1463,9 @@ function sparkline(history) {
   const poly = pts.map((p, i) =>
     (i * step).toFixed(1) + ',' + (h - (p.score / 100) * (h - 6) - 3).toFixed(1)).join(' ');
   return '<svg viewBox="0 0 ' + w + ' ' + h + '" class="spark">' +
-    '<polyline points="' + poly + '" fill="none" stroke="#9d8cff" stroke-width="1.6"/>' +
-    '</svg><div class="fact" style="border-bottom:0"><span>история score</span>' +
-    '<span>последние ' + pts.length + ' сканов</span></div>';
+    '<polyline points="' + poly + '" fill="none" stroke="' + accentColor() + '" stroke-width="1.6"/>' +
+    '</svg><div class="fact" style="border-bottom:0"><span>' + t('hist') + '</span>' +
+    '<span>' + t('hist_last') + ' ' + pts.length + ' ' + t('hist_scans') + '</span></div>';
 }
 
 async function loadHistory(star) {
@@ -1101,8 +1474,8 @@ async function loadHistory(star) {
   try {
     const data = await api('/api/history?path=' + encodeURIComponent(star.node.path));
     box.innerHTML = sparkline(data.history) ||
-      '<div class="fact" style="border-bottom:0"><span>история score</span>' +
-      '<span>появится после второго скана</span></div>';
+      '<div class="fact" style="border-bottom:0"><span>' + t('hist') + '</span>' +
+      '<span>' + t('hist_none') + '</span></div>';
   } catch (err) {
     box.innerHTML = '<div class="warnbox">история недоступна: ' + esc(err.message) + '</div>';
   }
@@ -1121,7 +1494,7 @@ async function runDoctor(star, btn) {
       return '<div class="doctorrow"><span>' + mark + ' ' + esc(c.check) + '</span>' +
              '<span>' + esc(c.detail || '') + '</span></div>';
     }).join('');
-    if (out) out.innerHTML = '<div class="kick" style="margin-top:14px">диагностика</div>' + rows;
+    if (out) out.innerHTML = '<div class="kick" style="margin-top:14px">' + t('kick_diag') + '</div>' + rows;
   } catch (err) {
     if (out) out.innerHTML = '<div class="warnbox">' + esc(err.message) + '</div>';
   } finally {
@@ -1169,11 +1542,11 @@ function renderPanel(star) {
 
   const junk = n.junk_bytes || 0;
   const diskHtml = junk > 0
-    ? '<div class="kick" style="margin-top:14px">мусор на диске · ' + esc(humanBytes(junk)) + '</div>' +
+    ? '<div class="kick" style="margin-top:14px">' + t('junk_kick') + esc(humanBytes(junk)) + '</div>' +
       (n.junk_parts || []).map((p) =>
         '<div class="junkrow"><span>' + esc(p.name) + '</span>' +
         '<span class="bytes">' + esc(humanBytes(p.bytes)) + '</span>' +
-        '<button data-clean="' + esc(p.name) + '">снести</button></div>').join('')
+        '<button data-clean="' + esc(p.name) + '">' + t('clean_btn') + '</button></div>').join('')
     : '';
   const warns = [];
   if (n.secrets > 0) warns.push('найдено секретов: ' + n.secrets);
@@ -1183,27 +1556,27 @@ function renderPanel(star) {
 
   ui.detail.innerHTML =
     '<button class="close" title="закрыть (Esc)">×</button>' +
-    '<div class="kick">проект</div>' +
+    '<div class="kick">' + t('kick') + '</div>' +
     '<h2>' + esc(n.name) + '</h2>' +
     '<div class="path">' + esc(n.path) + '</div>' +
     '<div class="scoreline"><span class="big">' + n.score + '</span>' +
     '<span class="of">/ 100</span>' +
     '<span class="badge st-' + n.status + '" style="border-color:' + star.status + '55;color:' + star.status + '">' +
-    esc(STATUS_LABELS[n.status]) + '</span></div>' +
+    esc(statusLabel(n.status)) + '</span></div>' +
     '<div class="meter"><i style="width:' + Math.max(2, n.score) + '%;background:linear-gradient(90deg,' +
-    ACCENT + ',' + star.status + ')"></i></div>' +
+    accentColor() + ',' + star.status + ')"></i></div>' +
     '<div class="facts">' +
-    fact('стек', n.stacks.join(', ') || '—') +
-    fact('простой', n.idle_days + ' ' + pluralDays(n.idle_days)) +
-    fact('ветка', n.branch || '—') +
-    fact('зависимости', String(n.deps)) +
-    fact('TODO', String(n.todos)) +
-    fact('вес на диске', humanBytes(n.total_bytes)) +
-    fact('README', n.has_readme ? 'есть' : 'нет') +
+    fact(t('f_stack'), n.stacks.join(', ') || '—') +
+    fact(t('f_idle'), n.idle_days + ' ' + pluralDays(n.idle_days)) +
+    fact(t('f_branch'), n.branch || '—') +
+    fact(t('f_deps'), String(n.deps)) +
+    fact(t('f_todos'), String(n.todos)) +
+    fact(t('f_weight'), humanBytes(n.total_bytes)) +
+    fact(t('f_readme'), n.has_readme ? t('yes') : t('no')) +
     '</div>' +
     '<div class="tagrow" id="tagRow"></div>' +
     '<textarea class="notebox" id="noteBox" maxlength="2000" ' +
-    'placeholder="заметка: что это, почему забросил, что доделать…">' + esc(meta.note) + '</textarea>' +
+    'placeholder="' + t('note_ph') + '">' + esc(meta.note) + '</textarea>' +
     warnHtml +
     (penalties ? '<ul class="why">' + penalties + '</ul>' : '') +
     (bonuses ? '<ul class="why bonus">' + bonuses + '</ul>' : '') +
@@ -1211,14 +1584,15 @@ function renderPanel(star) {
     '<div id="sparkBox"></div>' +
     '<div class="acts">' +
     '<div class="abtn main" data-open="code">VS Code</div>' +
-    '<div class="abtn" data-open="explorer">Папка</div>' +
-    '<div class="abtn" data-open="terminal">Терминал</div>' +
-    '<div class="abtn" id="runBtn">Запустить</div>' +
-    '<div class="abtn" id="resurrectBtn" title="окружение + зависимости + .env.example">Воскресить</div>' +
-    '<div class="abtn" id="doctorBtn">Диагностика</div>' +
-    (n.has_git ? '' : '<div class="abtn" id="gitBtn">Создать git</div>') +
-    (n.has_readme ? '' : '<div class="abtn" id="readmeBtn">Сгенерировать README</div>') +
-    '<div class="abtn" data-copy="path">Копировать путь</div>' +
+    '<div class="abtn" data-open="explorer">' + t('b_folder') + '</div>' +
+    '<div class="abtn" data-open="terminal">' + t('b_terminal') + '</div>' +
+    '<div class="abtn" id="runBtn">' + t('b_run') + '</div>' +
+    '<div class="abtn" id="resurrectBtn" title="venv / npm install / .env.example">' + t('b_res') + '</div>' +
+    '<div class="abtn" id="doctorBtn">' + t('b_doctor') + '</div>' +
+    (n.has_git ? '' : '<div class="abtn" id="gitBtn">' + t('b_git') + '</div>') +
+    (n.has_readme ? '' : '<div class="abtn" id="readmeBtn">' + t('b_readme') + '</div>') +
+    '<div class="abtn" data-copy="path">' + t('b_copy') + '</div>' +
+    '<div id="ghBox"></div>' +
     '</div>' +
     '<div id="runBox"></div><div id="resBox"></div><div id="doctorOut"></div>';
 
@@ -1260,6 +1634,7 @@ function renderPanel(star) {
   wireNote(star);
   wireRun(star);
   wireResurrect(star);
+  renderGhBox(star);
 
   loadHistory(star);
 }
@@ -1283,7 +1658,7 @@ function renderTags(star, meta) {
   });
   const input = document.createElement('input');
   input.className = 'taginput';
-  input.placeholder = '+ тег';
+  input.placeholder = t('tag_ph');
   input.maxLength = 24;
   input.onkeydown = (ev) => {
     if (ev.key === 'Enter' && input.value.trim()) {
@@ -1365,10 +1740,10 @@ function renderRunLog(path, st) {
   const box = ui.detail.querySelector('#runBox');
   if (!box) return;
   const head = '<div class="kick" style="margin-top:14px">' +
-    (st.running ? 'лог запуска · ' + (st.cmd || []).join(' ') : 'процесс завершён (код ' +
+    (st.running ? t('runlog_run') + (st.cmd || []).join(' ') : t('runlog_done') +
       (st.exit === null ? '?' : st.exit) + ')') + '</div>';
   const lines = (st.log || []).map((l) => esc(l)).join('\n');
-  box.innerHTML = head + '<div class="runlog">' + (lines || 'пока тихо…') + '</div>';
+  box.innerHTML = head + '<div class="runlog">' + (lines || t('runlog_quiet')) + '</div>';
   box.querySelector('.runlog').scrollTop = 1e9;
 }
 
@@ -1419,7 +1794,7 @@ function renderResLog(st) {
   const box = ui.detail.querySelector('#resBox');
   if (!box) return;
   const lines = (st.log || []).map((l) => esc(l)).join('\n');
-  box.innerHTML = '<div class="kick" style="margin-top:14px">воскрешение · ' +
+  box.innerHTML = '<div class="kick" style="margin-top:14px">' + t('res_kick') +
     esc(st.stage || '') + (st.running ? '…' : '') + '</div>' +
     '<div class="runlog">' + (lines || '…') + '</div>';
   box.querySelector('.runlog').scrollTop = 1e9;
@@ -1452,6 +1827,182 @@ function pluralDays(days) {
   if (d1 > 1 && d1 < 5) return 'дня';
   if (d1 === 1) return 'день';
   return 'дней';
+}
+
+/* ---------- GitHub в карточке: публикация, приватность, настройки, релизы ---------- */
+
+function ghLine(text, cls) {
+  const div = document.createElement('div');
+  div.className = 'ghline' + (cls ? ' ' + cls : '');
+  div.innerHTML = text;
+  return div;
+}
+
+function ghSwitch(labelText, checked, onChange) {
+  const wrap = document.createElement('label');
+  wrap.className = 'ghline';
+  wrap.style.cursor = 'pointer';
+  const sw = document.createElement('span');
+  sw.className = 'switch';
+  const inp = document.createElement('input');
+  inp.type = 'checkbox';
+  inp.checked = !!checked;
+  const knob = document.createElement('i');
+  sw.append(inp, knob);
+  const txt = document.createElement('span');
+  txt.textContent = labelText;
+  inp.addEventListener('change', () => onChange(inp.checked));
+  wrap.append(sw, txt);
+  return { wrap, inp };
+}
+
+async function renderGhBox(star) {
+  const box = ui.detail.querySelector('#ghBox');
+  if (!box) return;
+  box.innerHTML = '<div class="kick" style="margin-top:16px">GitHub</div>' +
+    '<div class="pempty">' + t('p_reading') + '</div>';
+  let info;
+  try {
+    info = await api('/api/gh/repo?path=' + encodeURIComponent(star.node.path));
+  } catch (err) {
+    box.innerHTML = '<div class="kick" style="margin-top:16px">GitHub</div>' +
+      '<div class="pempty">' + esc(err.message) + '</div>';
+    return;
+  }
+  box.innerHTML = '<div class="kick" style="margin-top:16px">GitHub</div>';
+  if (!info.has_git) return;                     // нет git — кнопка «Создать git» уже рядом
+
+  if (!info.authed) {
+    const row = ghLine(esc(t('gh_no_auth')));
+    const btn = document.createElement('button');
+    btn.className = 'langBtn';
+    btn.textContent = t('settings');
+    btn.onclick = openSettings;
+    row.append(btn);
+    box.append(row);
+    return;
+  }
+
+  if (!info.owner_repo) {
+    // публикация: имя репо + приватность
+    const row = document.createElement('div');
+    row.className = 'setrow';
+    const nameInp = document.createElement('input');
+    nameInp.className = 'searchbox';
+    nameInp.style.width = '200px';
+    nameInp.value = star.node.name;
+    row.append(nameInp);
+    const priv = ghSwitch(t('gh_private'), true, () => {});
+    priv.inp.id = 'ghPrivateChk';
+    row.append(priv.wrap);
+    const go = document.createElement('button');
+    go.className = 'langBtn';
+    go.textContent = t('gh_publish');
+    go.onclick = async () => {
+      go.disabled = true;
+      try {
+        const res = await api('/api/gh/publish', {
+          path: star.node.path, name: nameInp.value,
+          private: document.getElementById('ghPrivateChk').checked,
+        });
+        say('GitHub: ' + res.repo + ' ✓');
+        renderGhBox(star);
+      } catch (err) {
+        fail('GitHub: ' + err.message);
+        go.disabled = false;
+      }
+    };
+    row.append(go);
+    box.append(row);
+    return;
+  }
+
+  // репозиторий есть: ссылка, приватность, описание, issues/wiki
+  const link = ghLine('• <a href="' + esc(info.html_url || ('https://github.com/' + info.owner_repo)) +
+    '" target="_blank" style="color:var(--accent2)">' + esc(info.owner_repo) + '</a>' +
+    (info.private ? ' · <span style="color:var(--warn)">private</span>' : ' · public'));
+  box.append(link);
+
+  const privRow = ghSwitch(t('gh_private'), !!info.private, (on) => {
+    api('/api/gh/repo-settings', { path: star.node.path, private: on })
+      .then(() => say('GitHub: ' + (on ? 'private' : 'public') + ' ✓'))
+      .catch((err) => fail('GitHub: ' + err.message));
+  });
+  box.append(privRow.wrap);
+
+  const issues = ghSwitch('issues', info.has_issues !== false, (on) => {
+    api('/api/gh/repo-settings', { path: star.node.path, has_issues: on })
+      .then(() => say('issues: ' + (on ? 'on' : 'off')))
+      .catch((err) => fail('GitHub: ' + err.message));
+  });
+  box.append(issues.wrap);
+
+  const wiki = ghSwitch('wiki', info.has_wiki !== false, (on) => {
+    api('/api/gh/repo-settings', { path: star.node.path, has_wiki: on })
+      .then(() => say('wiki: ' + (on ? 'on' : 'off')))
+      .catch((err) => fail('GitHub: ' + err.message));
+  });
+  box.append(wiki.wrap);
+
+  const descRow = document.createElement('div');
+  descRow.className = 'setrow';
+  const descInp = document.createElement('input');
+  descInp.className = 'searchbox';
+  descInp.style.width = '220px';
+  descInp.placeholder = t('gh_desc_ph');
+  descInp.value = info.description || '';
+  descRow.append(descInp);
+  const descBtn = document.createElement('button');
+  descBtn.className = 'langBtn';
+  descBtn.textContent = t('gh_save');
+  descBtn.onclick = () => {
+    api('/api/gh/repo-settings', { path: star.node.path, description: descInp.value })
+      .then(() => say('description ✓'))
+      .catch((err) => fail('GitHub: ' + err.message));
+  };
+  descRow.append(descBtn);
+  box.append(descRow);
+
+  // релизы
+  const relKick = document.createElement('div');
+  relKick.className = 'secKick';
+  relKick.style.borderTop = 'none';
+  relKick.style.paddingTop = '6px';
+  relKick.textContent = t('gh_release');
+  box.append(relKick);
+  const relRow = document.createElement('div');
+  relRow.className = 'setrow';
+  const tagInp = document.createElement('input');
+  tagInp.className = 'searchbox';
+  tagInp.style.width = '120px';
+  tagInp.placeholder = t('gh_tag_ph');
+  relRow.append(tagInp);
+  const nameInp = document.createElement('input');
+  nameInp.className = 'searchbox';
+  nameInp.style.width = '170px';
+  nameInp.placeholder = t('gh_name_ph');
+  relRow.append(nameInp);
+  const relBtn = document.createElement('button');
+  relBtn.className = 'langBtn';
+  relBtn.textContent = t('gh_release');
+  relBtn.onclick = async () => {
+    if (!tagInp.value.trim()) { say(t('gh_tag_ph')); return; }
+    relBtn.disabled = true;
+    try {
+      const res = await api('/api/gh/release', {
+        path: star.node.path, tag: tagInp.value.trim(),
+        name: nameInp.value.trim(), body: '', target: info.default_branch || '',
+      });
+      say('release ' + res.tag + ' ✓');
+      if (res.url) window.open(res.url, '_blank');
+      relBtn.disabled = false;
+    } catch (err) {
+      fail('GitHub: ' + err.message);
+      relBtn.disabled = false;
+    }
+  };
+  relRow.append(relBtn);
+  box.append(relRow);
 }
 
 async function openTarget(path, how, btn) {
@@ -1530,6 +2081,7 @@ window.addEventListener('keydown', (ev) => {
   if (ev.key === 'Escape') {
     if (pickerOpen()) { closePicker(); return; }
     if (digestOpen()) { closeDigest(); return; }
+    if (settingsOpen()) { closeSettings(); return; }
     state.fly = { yaw: 0.6, pitch: -0.34, zoom: 1 };   // домой — плавно, а не телепортом
     select(null);
     return;

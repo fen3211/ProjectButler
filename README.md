@@ -26,6 +26,8 @@
 | Дайджест | панель «что изменилось с прошлого скана»: кто родился/ушёл, рост и падение score |
 | Живой фид | UI следит за версией фида: скан в другом окне или CLI — галактика обновляется сама |
 | Поиск по содержимому | `/` — поиск не только по имени, но и по зависимостям и README (`/api/search`), несовпадающие звёзды затмеваются |
+| GitHub | вход по Personal Access Token (проверка через /user), публикация проектов (создание репо + push), приватность, описание, issues/wiki, релизы с тегами — всё из карточки |
+| Настройки | темы «Тёмная материя / Глубокий космос / Закат на Марсе / Обсерватория» + свой стиль (4 цвета), язык RU/EN, вход в GitHub; хранятся в ~/.project-butler/settings.json |
 | MCP-сервер | 14 инструментов для Claude / Cline по stdio (без SDK) |
 | sqlite-база | `~/.project-butler/butler.db`, миграции без потери данных |
 
@@ -66,8 +68,17 @@ py -3.12 -m butler mcp                    :: MCP-сервер по stdio
 - `R` — пересканировать, `Esc` — сброс вида
 
 API маршруты: `GET /galaxy.json`, `GET /api/projects`, `GET /api/stacks`,
-`GET /api/browse` (диски и подпапки для пикера),
+`GET /api/browse`, `GET|POST /api/settings`, `GET /api/gh/status`, `GET /api/gh/repo`,
+`POST /api/gh/login|logout|publish|repo-settings|release`,
 `POST /api/scan`, `POST /api/open` (пути вне корня — 403).
+
+### Вход в GitHub
+
+`⚙ → github → вставить Personal Access Token` (создаётся на
+github.com/settings/tokens, права `repo`). Токен хранится только локально
+(`~/.project-butler/github.token`), в remote не пишется — подставляется
+на лету при push. Через карточку проекта: публикация (repo создаётся
+автоматически), переключение приватности, описание, issues/wiki, релизы.
 
 ## MCP-сервер (Claude Desktop / Cline)
 
@@ -96,7 +107,7 @@ API маршруты: `GET /galaxy.json`, `GET /api/projects`, `GET /api/stacks`
 ## Тесты
 
 ```bat
-py -3.12 -m unittest discover -s tests -v   :: 42 юнит-теста: MCP, пикер, теги, resurrect, run-детект, doctor, README
+py -3.12 -m unittest discover -s tests -v   :: 45 юнит-тестов: MCP, пикер, теги, resurrect, run-детект, doctor, README, github, settings
 py -3.12 scripts\smoke.py D:\Projects       :: e2e: сервер + API, открытие папок под заглушкой
 ```
 
@@ -114,6 +125,8 @@ butler/
   runner.py       # детект команды запуска проекта (npm start / py main.py / go run)
   mcp_server.py   # MCP по stdio (JSON-RPC 2.0), 14 инструментов
   webserver.py    # http://127.0.0.1:17373, статика ui/, мини-API, фоновые задачи
+  github.py       # GitHub без SDK: токен, публикация, настройки репо, релизы
+  readme_gen.py   # генерация каркаса README из фактов сканера
   config.py       # корни сканирования, ~/.project-butler/config.json
   detectors/      # python / node / docker / git / csharp / go
 ui/

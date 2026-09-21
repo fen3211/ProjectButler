@@ -7,7 +7,43 @@ HOME = Path.home() / ".project-butler"
 CONFIG_PATH = HOME / "config.json"
 FEED_PATH = HOME / "galaxy.json"
 DB_PATH = HOME / "butler.db"
+SETTINGS_PATH = HOME / "settings.json"
 FALLBACK_ROOT = r"D:\Projects"
+
+DEFAULT_SETTINGS = {"theme": "darkmatter", "lang": "ru", "custom": {}}
+
+
+def load_settings() -> dict:
+    """Настройки UI: тема, язык, свой стиль. Чужие ключи сохраняем."""
+    try:
+        with open(SETTINGS_PATH, "r", encoding="utf-8") as fh:
+            data = json.load(fh)
+        if not isinstance(data, dict):
+            return dict(DEFAULT_SETTINGS)
+    except (OSError, ValueError):
+        return dict(DEFAULT_SETTINGS)
+    out = dict(DEFAULT_SETTINGS)
+    out.update({k: v for k, v in data.items() if k in ("theme", "lang", "custom")})
+    if not isinstance(out["custom"], dict):
+        out["custom"] = {}
+    return out
+
+
+def save_settings(settings) -> dict:
+    """Пишет настройки (только известные ключи), возвращает сохранённое."""
+    out = dict(DEFAULT_SETTINGS)
+    out.update({k: v for k, v in (settings or {}).items()
+                if k in ("theme", "lang", "custom")})
+    if out["theme"] not in ("darkmatter", "deepspace", "mars", "observatory", "custom"):
+        out["theme"] = "darkmatter"
+    if out["lang"] not in ("ru", "en"):
+        out["lang"] = "ru"
+    if not isinstance(out["custom"], dict):
+        out["custom"] = {}
+    HOME.mkdir(parents=True, exist_ok=True)
+    with open(SETTINGS_PATH, "w", encoding="utf-8") as fh:
+        json.dump(out, fh, ensure_ascii=False, indent=2)
+    return out
 
 
 def load_config() -> dict:

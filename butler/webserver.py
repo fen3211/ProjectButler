@@ -13,7 +13,7 @@ from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
 from urllib.parse import parse_qs, urlsplit
 
-from . import config, resurrect as resurrect_mod, readme_gen, runner
+from . import config, github as gh, resurrect as resurrect_mod, readme_gen, runner
 from .disk import JUNK_DIRS
 from .doctor import diagnose
 from .index import build_feed, read_feed, summarize, write_feed, node as galaxy_node
@@ -372,6 +372,32 @@ class ButlerHandler(BaseHTTPRequestHandler):
             if not _within(target, self.root):
                 return self._error(403, "Путь вне корня сканирования — отказ")
             return self._json({"path": target, "history": history_for(target)})
+        if path == "/api/settings":
+            return self._json(config.load_settings())
+        if path == "/api/gh/status":
+            token = gh.get_token()
+            if not token:
+                return self._json({"authed": False})
+            who = gh.validate_token(token)
+            if not who.get("ok"):
+                return self._json({"authed": False, "stale": True, "error": who.get("error")})
+            return self._json({"authed": True, "login": who["login"],
+                               "name": who["name"], "avatar": who["avatar"]})
+        if path == "/api/gh/repo":
+            target = (parse_qs(urlsplit(self.path).query).get("path") or [""])[0]
+            if not _within(target, self.root):
+                return self._error(403, "Путь вне корня сканирования — отказ")
+            remote = gh.remote_url(target)
+            owner_repo = gh.parse_remote(remote)
+            out = {"has_git": os.path.isdir(os.path.join(target, ".git")),
+                   "remote": remote, "owner_repo": owner_repo, "authed": bool(gh.get_token())}
+            if owner_repo and gh.get_token():
+                info = gh.repo_info(owner_repo, gh.get_token())
+                if info.get("ok"):
+                    out.update({k: info[k] for k in ("private", "html_url", "description",
+                                                     "has_issues", "has_wiki")})
+                    out["on_github"] = True
+            return self._json(out)
         return self._error(404, f"Нет такого маршрута: {path}")
 
     def do_POST(self):                                   # noqa: N802
@@ -499,6 +525,59 @@ class ButlerHandler(BaseHTTPRequestHandler):
             plan = runner.detect_command(target, rec.get("stacks", []))
             result = readme_gen.generate(target, rec, plan)
             return self._json({"ok": True, "path": target, **result})
+        if path == "/api/settings":
+            return self._json(config.save_settings(args))
+        if path == "/api/gh/login":
+            token = str(args.get("token") or "").strip()
+            if not token:
+                return self._error(400, "Вставь Personal Access Token с правами repo")
+            who = gh.validate_token(token)
+            if not who.get("ok"):
+                return self._error(401, who.get("error", "токен не принят"))
+            gh.save_token(token)
+            return self._json({"ok": True, "login": who["login"], "name": who["name"],
+                               "avatar": who["avatar"]})
+        if path == "/api/gh/logout":
+            gh.clear_token()
+            return self._json({"ok": True})
+        if path == "/api/gh/publish":
+            target = str(args.get("path") or "")
+            if not _within(target, self.root):
+                return self._error(403, "Путь вне корня сканирования — отказ")
+            result = gh.publish(target, str(args.get("name") or ""),
+                                bool(args.get("private")), gh.get_token(),
+                                lambda t: None)
+            if not result.get("ok"):
+                return self._error(400, result.get("error", "публикация не удалась"))
+            return self._json({"ok": True, **result})
+        if path == "/api/gh/repo-settings":
+            target = str(args.get("path") or "")
+            if not _within(target, self.root):
+                return self._error(403, "Путь вне корня сканирования — отказ")
+            remote = gh.parse_remote(gh.remote_url(target))
+            if not remote:
+                return self._error(400, "у проекта нет GitHub-remote — сначала опубликуй")
+            result = gh.repo_settings(remote, gh.get_token(), args)
+            if not result.get("ok"):
+                return self._error(400, result.get("error", "настройки не применились"))
+            return self._json({"ok": True, **result})
+        if path == "/api/gh/release":
+            target = str(args.get("path") or "")
+            if not _within(target, self.root):
+                return self._error(403, "Путь вне корня сканирования — отказ")
+            remote = gh.parse_remote(gh.remote_url(target))
+            if not remote:
+                return self._error(400, "у проекта нет GitHub-remote — сначала опубликуй")
+            tag = str(args.get("tag") or "").strip()
+            if not tag:
+                return self._error(400, "укажи тег релиза, например v1.0.0")
+            result = gh.create_release(remote, gh.get_token(), tag,
+                                       str(args.get("name") or ""),
+                                       str(args.get("body") or ""),
+                                       str(args.get("target") or ""))
+            if not result.get("ok"):
+                return self._error(400, result.get("error", "релиз не создался"))
+            return self._json({"ok": True, **result})
         return self._error(404, f"Нет такого маршрута: {path}")
 
     # ---------- чтение для API ----------

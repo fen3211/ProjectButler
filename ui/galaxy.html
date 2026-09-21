@@ -17,8 +17,63 @@
     --good: #7ef0b2;
     --warn: #ffd479;
     --bad: #ff7a90;
+    --panel-bg-a: rgba(20, 18, 40, .72);
+    --panel-bg-b: rgba(6, 6, 12, .72);
+    --panel-strong-a: rgba(20, 18, 40, .94);
+    --panel-strong-b: rgba(6, 6, 12, .96);
+    --topbar-bg: rgba(2, 2, 6, .55);
+    --overlay: rgba(1, 1, 4, .62);
+    --input-bg: rgba(242, 244, 255, .05);
+    --input-hover: rgba(242, 244, 255, .08);
     --mono: "Cascadia Code", Consolas, monospace;
   }
+  /* ---------- темы: переменные + перекраска туманностей ---------- */
+  body[data-theme="deepspace"] {
+    --accent: #6ea8ff; --accent2: #4de3d0;
+    --bg: #01030a;
+    --panel-bg-a: rgba(10, 24, 46, .74); --panel-bg-b: rgba(3, 8, 20, .74);
+    --panel-strong-a: rgba(10, 24, 46, .95); --panel-strong-b: rgba(3, 8, 20, .95);
+    --topbar-bg: rgba(2, 6, 16, .55);
+    --overlay: rgba(1, 2, 8, .62);
+    --input-bg: rgba(220, 235, 255, .06);
+    --input-hover: rgba(220, 235, 255, .10);
+  }
+  body[data-theme="deepspace"] #cosmos .n1,
+  body[data-theme="deepspace"] #cosmos .n2 { filter: hue-rotate(-38deg) saturate(1.15); }
+  body[data-theme="mars"] {
+    --accent: #ffab6e; --accent2: #ffd479;
+    --bg: #0a0402;
+    --panel-bg-a: rgba(58, 24, 14, .74); --panel-bg-b: rgba(16, 6, 4, .74);
+    --panel-strong-a: rgba(58, 24, 14, .95); --panel-strong-b: rgba(16, 6, 4, .95);
+    --topbar-bg: rgba(12, 4, 2, .58);
+    --overlay: rgba(8, 2, 1, .62);
+    --input-bg: rgba(255, 235, 220, .06);
+    --input-hover: rgba(255, 235, 220, .10);
+  }
+  body[data-theme="mars"] #cosmos .n1,
+  body[data-theme="mars"] #cosmos .n3 { filter: hue-rotate(148deg) saturate(1.2); }
+  body[data-theme="mars"] #cosmos .n2 { filter: hue-rotate(120deg) saturate(.9); }
+  body[data-theme="observatory"] {
+    --bg: #f4f2ec;
+    --txt: #1c2233;
+    --dim: rgba(28, 34, 51, .62);
+    --mute: rgba(28, 34, 51, .38);
+    --faint: rgba(28, 34, 51, .2);
+    --hair: rgba(28, 34, 51, .14);
+    --accent: #6d4fd4; --accent2: #0e8fa8;
+    --good: #1d9e63; --warn: #c07f16; --bad: #d5495f;
+    --panel-bg-a: rgba(255, 255, 255, .82); --panel-bg-b: rgba(244, 242, 236, .82);
+    --panel-strong-a: rgba(255, 255, 255, .96); --panel-strong-b: rgba(244, 242, 236, .96);
+    --topbar-bg: rgba(244, 242, 236, .75);
+    --overlay: rgba(228, 224, 214, .55);
+    --input-bg: rgba(28, 34, 51, .05);
+    --input-hover: rgba(28, 34, 51, .09);
+  }
+  body[data-theme="observatory"] #cosmos { opacity: .16; }
+  body[data-theme="observatory"] #sky { opacity: 1; }
+  body[data-theme="observatory"] .pbox,
+  body[data-theme="observatory"] .detail { box-shadow: 0 30px 80px rgba(28, 34, 51, .18); }
+  body[data-theme="observatory"] .runlog { background: rgba(28, 34, 51, .05); }
   * { margin: 0; box-sizing: border-box; }
   html, body { height: 100%; }
   body {
@@ -176,7 +231,7 @@
     position: fixed; top: 0; left: 0; right: 0; height: 64px; z-index: 6;
     display: flex; align-items: center; gap: 28px; padding: 0 36px;
     border-bottom: 1px solid var(--hair);
-    background: rgba(2, 2, 6, .55); backdrop-filter: blur(14px);
+    background: var(--topbar-bg); backdrop-filter: blur(14px);
   }
   .top::after {
     content: ""; position: absolute; left: 0; right: 0; bottom: -1px; height: 1px;
@@ -191,12 +246,12 @@
   .rootbox { display: flex; gap: 8px; align-items: center; }
   .rootbox input {
     width: 200px; font: 11.5px var(--mono); color: var(--txt);
-    background: rgba(242, 244, 255, .05); border: 1px solid var(--hair);
+    background: var(--input-bg); border: 1px solid var(--hair);
     border-radius: 10px; padding: 7px 12px; outline: none;
     transition: border-color 140ms ease, background 140ms ease;
   }
   .rootbox input::placeholder { color: var(--mute); }
-  .rootbox input:hover { background: rgba(242, 244, 255, .08); }
+  .rootbox input:hover { background: var(--input-hover); }
   .rootbox input:focus { border-color: rgba(157, 140, 255, .55); }
   .rootbox button {
     font: 400 10.5px "Segoe UI", sans-serif; letter-spacing: .14em; text-transform: uppercase;
@@ -212,7 +267,7 @@
   .picker {
     position: fixed; inset: 0; z-index: 20; display: none;
     align-items: center; justify-content: center;
-    background: rgba(1, 1, 4, .62); backdrop-filter: blur(8px);
+    background: var(--overlay); backdrop-filter: blur(8px);
   }
   .picker.open { display: flex; }
   .pbox {
@@ -220,7 +275,7 @@
     display: flex; flex-direction: column;
     border: 1px solid transparent; border-radius: 24px;
     background:
-      linear-gradient(160deg, rgba(20, 18, 40, .94), rgba(6, 6, 12, .96)) padding-box,
+      linear-gradient(160deg, var(--panel-strong-a), var(--panel-strong-b)) padding-box,
       linear-gradient(140deg, rgba(157, 140, 255, .5), rgba(110, 231, 255, .18) 45%, rgba(157, 140, 255, .28) 75%, rgba(110, 231, 255, .38)) border-box;
     box-shadow: 0 40px 100px rgba(0, 0, 0, .6);
   }
@@ -290,12 +345,12 @@
   /* поиск-затмение */
   .searchbox {
     width: 170px; font: 11.5px var(--mono); color: var(--txt);
-    background: rgba(242, 244, 255, .05); border: 1px solid var(--hair);
+    background: var(--input-bg); border: 1px solid var(--hair);
     border-radius: 10px; padding: 7px 12px; outline: none;
     transition: border-color 140ms ease, background 140ms ease, width 220ms cubic-bezier(.2, .8, .2, 1);
   }
   .searchbox::placeholder { color: var(--mute); }
-  .searchbox:hover { background: rgba(242, 244, 255, .08); }
+  .searchbox:hover { background: var(--input-hover); }
   .searchbox:focus { border-color: rgba(157, 140, 255, .55); width: 230px; }
 
   /* плёночное зерно поверх всего — «снято в реальности», а не отрисовано */
@@ -324,7 +379,7 @@
     position: fixed; left: 36px; right: 36px; bottom: 30px; z-index: 5;
     border: 1px solid transparent; border-radius: 20px; padding: 12px 10px;
     background:
-      linear-gradient(180deg, rgba(11, 10, 24, .60), rgba(6, 6, 14, .58)) padding-box,
+      linear-gradient(180deg, var(--panel-bg-a), var(--panel-bg-b)) padding-box,
       linear-gradient(115deg, rgba(157, 140, 255, .38), rgba(110, 231, 255, .14) 40%, rgba(255, 122, 190, .18) 70%, rgba(157, 140, 255, .42)) border-box;
     backdrop-filter: blur(20px);
     display: flex; gap: 6px; overflow-x: auto; scrollbar-width: thin;
@@ -428,7 +483,7 @@
     position: fixed; right: 36px; top: 96px; width: 340px; z-index: 6;
     border: 1px solid transparent; border-radius: 24px; padding: 26px 26px 22px;
     background:
-      linear-gradient(160deg, rgba(20, 18, 40, .72), rgba(6, 6, 12, .72)) padding-box,
+      linear-gradient(160deg, var(--panel-bg-a), var(--panel-bg-b)) padding-box,
       linear-gradient(140deg, rgba(157, 140, 255, .55), rgba(110, 231, 255, .16) 45%, rgba(255, 122, 190, .2) 70%, rgba(110, 231, 255, .42)) border-box;
     backdrop-filter: blur(22px);
     box-shadow: 0 30px 80px rgba(0, 0, 0, .55);
@@ -563,6 +618,7 @@
     <button id="digestBtn" title="Что изменилось с прошлого скана">дайджест</button>
     <button id="browseBtn" title="Выбрать папку на диске">обзор</button>
     <button id="rootApply" title="Просканировать папку">скан</button>
+    <button id="settingsBtn" title="Темы, язык, GitHub">⚙</button>
   </div>
 </header>
 
@@ -592,6 +648,17 @@
   </div>
 </div>
 
+<div id="settingsPanel" class="picker">
+  <div class="pbox" role="dialog" aria-label="Настройки" style="width: 620px;">
+    <div class="phead">
+      <div class="pkick" id="setKick">настройки</div>
+      <div class="ppath" id="setGhLine"></div>
+      <button class="pclose" id="setClose" title="закрыть (Esc)">×</button>
+    </div>
+    <div class="plist" id="settingsBody" style="min-height: 320px;"></div>
+  </div>
+</div>
+
 <div id="picker" class="picker">
   <div class="pbox" role="dialog" aria-label="Выбор папки сканирования">
     <div class="phead">
@@ -611,3 +678,37 @@
 <script src="/ui/galaxy.js"></script>
 </body>
 </html>
+<style>
+  /* ---------- настройки: темы, язык, github ---------- */
+  .themeGrid { display: grid; grid-template-columns: repeat(3, 1fr); gap: 10px; margin-top: 10px; }
+  .themeCard {
+    border: 1px solid var(--hair); border-radius: 14px; padding: 10px; cursor: pointer;
+    text-align: center; font-size: 11.5px; color: var(--dim);
+    transition: border-color 140ms ease, transform 160ms cubic-bezier(.2,.8,.2,1);
+  }
+  .themeCard:hover { transform: translateY(-2px); border-color: rgba(157, 140, 255, .45); }
+  .themeCard.on { border-color: rgba(157, 140, 255, .7); color: var(--txt);
+    box-shadow: inset 0 0 20px rgba(157, 140, 255, .10); }
+  .themeCard .swatch { height: 40px; border-radius: 9px; margin-bottom: 7px; }
+  .setrow { display: flex; align-items: center; gap: 10px; margin-top: 10px; flex-wrap: wrap; }
+  .setrow label { font-size: 12px; color: var(--dim); min-width: 90px; }
+  .colorInp { width: 52px; height: 30px; padding: 2px; border: 1px solid var(--hair);
+    border-radius: 8px; background: transparent; cursor: pointer; }
+  .langBtn { padding: 6px 16px; border: 1px solid var(--hair); border-radius: 10px;
+    background: transparent; color: var(--dim); cursor: pointer; font-size: 12px; }
+  .langBtn.on { border-color: rgba(157, 140, 255, .6); color: var(--txt);
+    background: rgba(157, 140, 255, .12); }
+  .ghline { display: flex; align-items: center; gap: 10px; margin-top: 8px; font-size: 12.5px; }
+  .ghline img { width: 26px; height: 26px; border-radius: 50%; }
+  .switch { position: relative; width: 38px; height: 20px; flex: none; cursor: pointer; }
+  .switch input { display: none; }
+  .switch i { position: absolute; inset: 0; border-radius: 999px; background: var(--faint);
+    transition: background 160ms ease; }
+  .switch i::after { content: ""; position: absolute; top: 2px; left: 2px; width: 16px; height: 16px;
+    border-radius: 50%; background: var(--mute); transition: transform 160ms ease, background 160ms ease; }
+  .switch input:checked + i { background: rgba(157, 140, 255, .35); }
+  .switch input:checked + i::after { transform: translateX(18px); background: var(--accent); }
+  .secKick { margin-top: 18px; font-size: 10px; letter-spacing: .24em; text-transform: uppercase;
+    color: var(--mute); border-top: 1px solid var(--hair); padding-top: 14px; }
+</style>
+</body>
