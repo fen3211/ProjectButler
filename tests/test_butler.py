@@ -193,6 +193,23 @@ class ScanAndFeed(unittest.TestCase):
         self.assertEqual(index.read_feed(out)["totals"]["projects"], 3)
         self.assertFalse((self.root / "galaxy.json.tmp").exists())
 
+    def test_scan_survives_permission_error(self):
+        # Windows-джанкшены вроде C:\Documents and Settings кидают PermissionError
+        # на is_dir() — скан обязан молча их пропустить, а не ронять весь обход.
+        (self.root / "Locked").mkdir()
+        (self.root / "Locked" / "app.py").write_text("print('x')\n", encoding="utf-8")
+        real_is_dir = Path.is_dir
+
+        def denying(path, **kwargs):
+            if path.name == "Locked":
+                raise PermissionError(5, "Отказано в доступе")
+            return real_is_dir(path, **kwargs)
+
+        with mock.patch.object(Path, "is_dir", denying):
+            projects = {p.name for p in scan(self.root)}
+        self.assertIn("Alive", projects)
+        self.assertNotIn("Locked", projects)
+
 
 class StoreRoundtrip(unittest.TestCase):
     def setUp(self):
@@ -443,6 +460,49 @@ class DiskDupesSecrets(unittest.TestCase):
         self.assertIn("# Project Butler — отчёт", report)
         self.assertIn("| Проект |", report)
         self.assertIn("CloneA", report)
+
+
+class BrowseTest(unittest.TestCase):
+    """Пикер папок: _browse отдаёт подпапки без файлов, точек, долларов и симлинок."""
+
+    def setUp(self):
+        self.tmp = tempfile.TemporaryDirectory()
+        self.root = Path(self.tmp.name).resolve()
+        for name in ("alpha", "Beta", ".hidden", "$junk"):
+            (self.root / name).mkdir()
+        (self.root / "readme.txt").write_text("файл, не папка", encoding="utf-8")
+
+    def tearDown(self):
+        self.tmp.cleanup()
+
+    def test_lists_only_clean_dirs(self):
+        from butler import webserver
+        data = webserver._browse(str(self.root))
+        self.assertEqual(data["dirs"], ["alpha", "Beta"])
+        self.assertEqual(data["path"], str(self.root))
+        self.assertEqual(data["parent"], str(self.root.parent))
+        self.assertIn("drives", data)
+
+    def test_empty_path_gives_drives(self):
+        from butler import webserver
+        data = webserver._browse("")
+        self.assertEqual(data["dirs"], [])
+        self.assertIsNone(data["parent"])
+        self.assertIsInstance(data["drives"], list)
+
+    def test_missing_path_is_error(self):
+        from butler import webserver
+        data = webserver._browse(str(self.root / "Nope42"))
+        self.assertIn("error", data)
+
+    def test_bare_drive_letter_is_rooted(self):
+        from butler import webserver
+        # голая буква диска не должна скатываться в cwd процесса
+        if os.path.isdir("Q:\\"):
+            self.assertEqual(webserver._browse("Q:")["path"], "Q:\\")
+        else:
+            self.assertIn("error", webserver._browse("Q:"))
+            self.assertIn("error", webserver._browse("Q:\\"))
 
 
 if __name__ == "__main__":

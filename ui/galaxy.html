@@ -6,159 +6,472 @@
 <title>Project Butler — галактика проектов</title>
 <style>
   :root {
-    --bg-0: #05060a;
-    --panel: rgba(13, 18, 30, 0.82);
-    --panel-border: rgba(120, 160, 255, 0.16);
-    --text: #e8eefc;
-    --text-dim: #93a4c4;
-    --text-mute: #61708c;
-    --accent: #7dd3fc;
-    --alive: #4ade80;
-    --abandoned: #fbbf24;
-    --broken: #f87171;
-    --unknown: #6b7a99;
-    --radius: 12px;
-    --s1: 4px; --s2: 8px; --s3: 12px; --s4: 16px; --s6: 24px;
-    --shadow: 0 12px 32px rgba(0, 0, 0, 0.45);
+    --bg: #010104;
+    --txt: #f2f4ff;
+    --dim: rgba(242, 244, 255, .55);
+    --mute: rgba(242, 244, 255, .30);
+    --faint: rgba(242, 244, 255, .16);
+    --hair: rgba(242, 244, 255, .10);
+    --accent: #9d8cff;
+    --accent2: #6ee7ff;
+    --good: #7ef0b2;
+    --warn: #ffd479;
+    --bad: #ff7a90;
+    --mono: "Cascadia Code", Consolas, monospace;
   }
-  * { box-sizing: border-box; }
-  html, body { height: 100%; margin: 0; }
+  * { margin: 0; box-sizing: border-box; }
+  html, body { height: 100%; }
   body {
-    background: radial-gradient(1200px 800px at 30% 20%, #0d1424 0%, var(--bg-0) 70%);
-    color: var(--text);
-    font: 14px/1.45 "Segoe UI", Roboto, system-ui, -apple-system, sans-serif;
+    background: var(--bg);
+    color: var(--txt);
+    font: 300 14px/1.5 "Segoe UI", system-ui, -apple-system, sans-serif;
+    letter-spacing: .01em;
     overflow: hidden;
   }
   #sky { position: fixed; inset: 0; display: block; cursor: grab; }
   #sky.dragging { cursor: grabbing; }
-  .hud { position: fixed; pointer-events: none; display: flex; flex-direction: column; gap: var(--s3); }
-  .hud.top-left { top: var(--s6); left: var(--s6); max-width: 44ch; }
-  .hud.bottom-left { bottom: var(--s6); left: var(--s6); }
-  .card {
-    pointer-events: auto; background: var(--panel); border: 1px solid var(--panel-border);
-    border-radius: var(--radius); backdrop-filter: blur(10px);
-    box-shadow: var(--shadow); padding: var(--s4);
+
+  /* ---------- живой космос под галактикой ---------- */
+  #cosmos {
+    position: fixed; inset: 0; overflow: hidden; pointer-events: none;
+    background:
+      radial-gradient(120% 90% at 70% 110%, #0b0630 0%, rgba(11, 6, 48, 0) 55%),
+      radial-gradient(100% 80% at 15% -10%, #040a2e 0%, rgba(4, 10, 46, 0) 60%),
+      var(--bg);
   }
-  h1 { margin: 0 0 var(--s2); font-size: 17px; letter-spacing: .02em; font-weight: 600; }
-  h1 span { color: var(--accent); }
-  .sub { color: var(--text-dim); font-size: 12px; word-break: break-all; }
-  .stats { display: flex; flex-wrap: wrap; gap: var(--s4); margin-top: var(--s3); }
-  .stat { min-width: 72px; }
-  .stat b { display: block; font-size: 22px; font-variant-numeric: tabular-nums; line-height: 1.1; }
-  .stat small { color: var(--text-mute); text-transform: uppercase; font-size: 10px; letter-spacing: .08em; }
-  .chips { display: flex; flex-wrap: wrap; gap: var(--s2); margin-top: var(--s3); }
-  .chip {
-    pointer-events: auto; cursor: pointer; display: inline-flex; align-items: center; gap: var(--s2);
-    padding: var(--s1) var(--s3); border-radius: 999px; border: 1px solid var(--panel-border);
-    background: rgba(255,255,255,.03); color: var(--text-dim); font-size: 12px;
-    transition: border-color 120ms ease, color 120ms ease, background 120ms ease;
+  .nebula {
+    position: absolute; border-radius: 50%; filter: blur(60px);
+    mix-blend-mode: screen; will-change: transform, opacity; opacity: .6;
   }
-  .chip:hover { color: var(--text); border-color: rgba(125,211,252,.45); }
-  .chip[aria-pressed="true"] { color: #04121c; background: var(--accent); border-color: var(--accent); font-weight: 600; }
-  .dot { width: 8px; height: 8px; border-radius: 50%; background: currentColor; }
-  .legend { display: grid; grid-template-columns: repeat(2, minmax(96px, 1fr)); gap: var(--s2) var(--s4); }
-  .legend div { display: flex; align-items: center; gap: var(--s2); color: var(--text-dim); font-size: 12px; }
-  .legend i { width: 10px; height: 10px; border-radius: 3px; display: inline-block; }
-  #panel {
-    position: fixed; top: var(--s6); right: var(--s6); width: 360px;
-    transform: translateX(120%); transition: transform 180ms cubic-bezier(.2,.8,.2,1);
-    max-height: calc(100vh - 96px); overflow: auto;
+  .n1 { width: 60vw; height: 60vw; left: -12vw; top: -18vw;
+    background:
+      radial-gradient(circle at 30% 30%, rgba(158, 104, 255, .40), transparent 42%),
+      radial-gradient(circle at 64% 60%, rgba(150, 84, 255, .28), transparent 52%),
+      radial-gradient(circle at 55% 55%, rgba(96, 60, 255, .62), rgba(96, 60, 255, 0) 66%);
+    animation: neb1 48s ease-in-out infinite alternate, breathe1 13s ease-in-out infinite alternate; }
+  .n2 { width: 52vw; height: 52vw; right: -14vw; bottom: -20vw;
+    background:
+      radial-gradient(circle at 38% 40%, rgba(220, 252, 255, .34), transparent 30%),
+      radial-gradient(circle at 55% 62%, rgba(120, 236, 255, .26), transparent 54%),
+      radial-gradient(circle at 60% 60%, rgba(46, 210, 255, .58), rgba(46, 210, 255, 0) 66%);
+    animation: neb2 62s ease-in-out infinite alternate, breathe2 17s ease-in-out 3s infinite alternate; }
+  .n3 { width: 46vw; height: 46vw; left: 30vw; top: 42vh;
+    background:
+      radial-gradient(circle at 44% 40%, rgba(255, 196, 226, .30), transparent 34%),
+      radial-gradient(circle at 58% 56%, rgba(255, 84, 170, .34), transparent 56%),
+      radial-gradient(circle at 50% 50%, rgba(255, 70, 160, .48), rgba(255, 70, 160, 0) 68%);
+    animation: neb3 55s ease-in-out infinite alternate, breathe3 11s ease-in-out 6s infinite alternate; }
+  .n4 { left: -20vw; top: 24vh; width: 140vw; height: 26vh; border-radius: 50%;
+    background: linear-gradient(90deg, rgba(255, 255, 255, 0), rgba(196, 186, 255, .22) 30%, rgba(140, 224, 255, .18) 60%, rgba(255, 255, 255, 0));
+    filter: blur(46px); transform: rotate(-9deg); opacity: .8;
+    animation: band 70s ease-in-out infinite alternate, breathe2 23s ease-in-out 2s infinite alternate; }
+  /* траектории с изломами: пятно не скользит по прямой, а шатается — видно движение */
+  @keyframes neb1 {
+    0%   { transform: translate(0, 0) scale(1); }
+    30%  { transform: translate(6vw, 4vh) scale(1.12); }
+    65%  { transform: translate(-3vw, 8vh) scale(.94); }
+    100% { transform: translate(8vw, -2vh) scale(1.16); }
   }
-  #panel.open { transform: translateX(0); }
-  #panel h2 { margin: 0 0 var(--s1); font-size: 18px; }
-  #panel .tagline { color: var(--text-dim); font-size: 12px; margin-bottom: var(--s3); }
-  .row { display: flex; justify-content: space-between; gap: var(--s3); padding: var(--s1) 0; font-size: 13px; }
-  .row span:first-child { color: var(--text-mute); }
-  .meter { height: 6px; border-radius: 3px; background: rgba(255,255,255,.08); overflow: hidden; margin: var(--s3) 0 var(--s1); }
-  .meter > i { display: block; height: 100%; background: var(--accent); }
-  .why { list-style: none; margin: var(--s3) 0 0; padding: 0; }
-  .why li { color: var(--text-dim); font-size: 12px; padding-left: var(--s4); position: relative; }
-  .why li::before { content: "▸"; position: absolute; left: var(--s1); color: var(--broken); }
-  .why.bonus li::before { content: "+"; color: var(--alive); }
-  .section { margin-top: var(--s3); font-size: 12px; color: var(--text-dim); text-transform: uppercase; letter-spacing: .06em; }
-  .junkrow {
-    display: flex; align-items: center; gap: var(--s3);
-    padding: var(--s1) 0; font-size: 13px;
+  @keyframes neb2 {
+    0%   { transform: translate(0, 0) scale(1.1); }
+    35%  { transform: translate(-7vw, -5vh) scale(.92); }
+    70%  { transform: translate(4vw, -9vh) scale(1.18); }
+    100% { transform: translate(-2vw, 3vh) scale(1); }
   }
-  .junkrow span:first-child { flex: 1; font-family: Consolas, monospace; }
-  .junkrow button { padding: 2px var(--s2); font-size: 11px; }
-  .junkrow button:hover { background: rgba(248,113,113,.18); border-color: rgba(248,113,113,.5); }
+  @keyframes neb3 {
+    0%   { transform: translate(0, 0) scale(.95); }
+    40%  { transform: translate(7vw, 5vh) scale(1.1); }
+    75%  { transform: translate(-4vw, 7vh) scale(1.02); }
+    100% { transform: translate(6vw, -6vh) scale(1.2); }
+  }
+  @keyframes band { from { transform: rotate(-9deg) translateX(-4vw); } to { transform: rotate(-5deg) translateX(5vw); } }
+  /* дыхание яркостью — жизнь даже когда дрейф не виден */
+  @keyframes breathe1 { from { opacity: .40; } to { opacity: .78; } }
+  @keyframes breathe2 { from { opacity: .52; } to { opacity: .88; } }
+  @keyframes breathe3 { from { opacity: .38; } to { opacity: .74; } }
+
+  .plx {
+    position: absolute; inset: -60%; will-change: transform;
+    transform: translate3d(calc(var(--px, 0) * var(--depth, 0) * 1px),
+                           calc(var(--py, 0) * var(--depth, 0) * 1px), 0);
+  }
+  .p0 { inset: 0; --depth: 14; }
+  .p1 { --depth: 14; }
+  .p2 { --depth: 30; }
+  .p3 { --depth: 52; }
+
+  .starfield { position: absolute; inset: 0; will-change: transform, opacity; }
+  .sf1 {
+    background-image:
+      radial-gradient(1px 1px at 23px 41px, rgba(255, 255, 255, .85), transparent),
+      radial-gradient(1px 1px at 134px 97px, rgba(255, 255, 255, .55), transparent),
+      radial-gradient(1.5px 1.5px at 61px 180px, rgba(178, 200, 255, .8), transparent),
+      radial-gradient(1px 1px at 190px 26px, rgba(255, 255, 255, .45), transparent);
+    background-size: 230px 230px; opacity: .5;
+    animation: drift1 120s linear infinite, twinkle 4.5s ease-in-out infinite alternate;
+  }
+  .sf2 {
+    background-image:
+      radial-gradient(1.5px 1.5px at 47px 29px, rgba(255, 255, 255, .9), transparent),
+      radial-gradient(1px 1px at 171px 143px, rgba(160, 240, 255, .7), transparent),
+      radial-gradient(2px 2px at 108px 96px, rgba(255, 226, 190, .75), transparent);
+    background-size: 310px 310px; opacity: .65;
+    animation: drift2 85s linear infinite, twinkle 6.5s ease-in-out .8s infinite alternate;
+  }
+  .sf3 {
+    background-image:
+      radial-gradient(2px 2px at 88px 64px, rgba(255, 255, 255, .95), transparent),
+      radial-gradient(1.5px 1.5px at 226px 188px, rgba(190, 170, 255, .8), transparent);
+    background-size: 420px 420px; opacity: .75;
+    animation: drift3 60s linear infinite, twinkle 8s ease-in-out .4s infinite alternate;
+  }
+  @keyframes drift1 { to { transform: translate3d(230px, 115px, 0); } }
+  @keyframes drift2 { to { transform: translate3d(-310px, 155px, 0); } }
+  @keyframes drift3 { to { transform: translate3d(420px, -210px, 0); } }
+  @keyframes twinkle { from { opacity: .3; } to { opacity: 1; } }
+
+  /* падающие звёзды */
+  .meteor {
+    position: absolute; width: 170px; height: 1.5px; border-radius: 1px; opacity: 0;
+    background: linear-gradient(90deg, rgba(255, 255, 255, 0), rgba(214, 232, 255, .95));
+    animation: meteor 8s linear infinite; will-change: transform, opacity;
+  }
+  .m1 { top: 9%; left: 14%; animation-delay: 2.5s; }
+  .m2 { top: 28%; left: 52%; animation-duration: 11s; animation-delay: 5s; }
+  .m3 { top: 58%; left: -4%; animation-duration: 9s; animation-delay: 10s; }
+  .m4 { top: 72%; left: 26%; animation-duration: 10s; animation-delay: 15.5s; }
+  @keyframes meteor {
+    0%   { opacity: 0; transform: rotate(24deg) translateX(0); }
+    3%   { opacity: .95; }
+    11%  { opacity: 0; transform: rotate(24deg) translateX(48vw); }
+    100% { opacity: 0; transform: rotate(24deg) translateX(48vw); }
+  }
+
+  /* мягкое свечение за курсором — «фонарик в туманности» */
+  #cosmosGlow {
+    position: absolute; width: 540px; height: 540px; left: 0; top: 0;
+    margin: -270px 0 0 -270px; border-radius: 50%; pointer-events: none;
+    mix-blend-mode: screen; opacity: .6;
+    background: radial-gradient(circle, rgba(122, 142, 255, .22), rgba(72, 112, 255, .09) 42%, transparent 70%);
+    transform: translate3d(var(--gx, 50vw), var(--gy, 38vh), 0);
+    will-change: transform;
+  }
+
+  /* движение космоса гасится ТОЛЬКО вручную — тумблером «✦ космос» в легенде
+     (localStorage 'cosmos-still'). Системный prefers-reduced-motion больше не
+     режет анимации: у части юзеров анимации Windows выключены системно,
+     и авто-kill делал фон мёртвым без всякой возможности это починить. */
+  #cosmos.still .nebula, #cosmos.still .starfield, #cosmos.still .meteor { animation: none; }
+  #cosmos.still .plx { transform: none; }
+  #cosmos.still #cosmosGlow { opacity: 0; }
+
+  /* ---------- верхняя строка ---------- */
+  .top {
+    position: fixed; top: 0; left: 0; right: 0; height: 64px; z-index: 6;
+    display: flex; align-items: center; gap: 28px; padding: 0 36px;
+    border-bottom: 1px solid var(--hair);
+    background: rgba(2, 2, 6, .55); backdrop-filter: blur(14px);
+  }
+  .wordmark { font-size: 14px; font-weight: 350; letter-spacing: .34em; text-transform: uppercase; white-space: nowrap; }
+  .wordmark em { font-style: normal; color: var(--accent); }
+  .topmeta { display: flex; gap: 30px; margin-left: auto; font-variant-numeric: tabular-nums; overflow: hidden; }
+  .topmeta b { display: block; font-weight: 500; font-size: 15px; line-height: 1.2; }
+  .topmeta small { display: block; text-transform: uppercase; letter-spacing: .16em; font-size: 9px; color: var(--mute); }
+  .rootbox { display: flex; gap: 8px; align-items: center; }
+  .rootbox input {
+    width: 200px; font: 11.5px var(--mono); color: var(--txt);
+    background: rgba(242, 244, 255, .05); border: 1px solid var(--hair);
+    border-radius: 10px; padding: 7px 12px; outline: none;
+    transition: border-color 140ms ease, background 140ms ease;
+  }
+  .rootbox input::placeholder { color: var(--mute); }
+  .rootbox input:hover { background: rgba(242, 244, 255, .08); }
+  .rootbox input:focus { border-color: rgba(157, 140, 255, .55); }
+  .rootbox button {
+    font: 400 10.5px "Segoe UI", sans-serif; letter-spacing: .14em; text-transform: uppercase;
+    color: var(--dim); background: transparent; border: 1px solid var(--hair);
+    border-radius: 10px; padding: 8px 14px; cursor: pointer;
+    transition: color 140ms ease, border-color 140ms ease, background 140ms ease;
+  }
+  .rootbox button:hover { color: var(--txt); border-color: rgba(157, 140, 255, .5); background: rgba(157, 140, 255, .10); }
+  .rootbox button:active { transform: translateY(1px); }
+  .rootbox button[disabled] { opacity: .4; cursor: not-allowed; }
+
+  /* ---------- пикер папок ---------- */
+  .picker {
+    position: fixed; inset: 0; z-index: 20; display: none;
+    align-items: center; justify-content: center;
+    background: rgba(1, 1, 4, .62); backdrop-filter: blur(8px);
+  }
+  .picker.open { display: flex; }
+  .pbox {
+    width: 540px; max-width: calc(100vw - 48px); max-height: min(660px, calc(100vh - 96px));
+    display: flex; flex-direction: column;
+    border: 1px solid var(--hair); border-radius: 24px;
+    background: linear-gradient(160deg, rgba(20, 18, 40, .94), rgba(6, 6, 12, .96));
+    box-shadow: 0 40px 100px rgba(0, 0, 0, .6);
+  }
+  .phead { padding: 22px 24px 12px; position: relative; }
+  .pkick { font-size: 10px; letter-spacing: .26em; text-transform: uppercase; color: var(--mute); }
+  .ppath { font-family: var(--mono); font-size: 12.5px; color: var(--txt); margin-top: 6px;
+    word-break: break-all; padding-right: 36px; }
+  .pclose {
+    position: absolute; top: 18px; right: 20px; width: 26px; height: 26px; line-height: 24px;
+    text-align: center; border: 1px solid var(--hair); border-radius: 50%;
+    color: var(--mute); cursor: pointer; font-size: 13px; background: transparent;
+    transition: color 140ms ease, border-color 140ms ease;
+  }
+  .pclose:hover { color: var(--txt); border-color: rgba(157, 140, 255, .5); }
+  .pdrives { display: flex; flex-wrap: wrap; gap: 8px; padding: 2px 24px 12px; }
+  .pdrive {
+    font: 400 12px var(--mono); color: var(--dim); cursor: pointer;
+    padding: 5px 13px; border: 1px solid var(--hair); border-radius: 999px; background: transparent;
+    transition: color 140ms ease, border-color 140ms ease, background 140ms ease;
+  }
+  .pdrive:hover { color: var(--txt); border-color: rgba(157, 140, 255, .5); }
+  .pdrive.on { color: var(--txt); background: rgba(157, 140, 255, .14); border-color: rgba(157, 140, 255, .55); }
+  .plist { flex: 1; overflow-y: auto; padding: 2px 12px 12px; min-height: 180px;
+    scrollbar-width: thin; scrollbar-color: var(--faint) transparent; }
+  .plist::-webkit-scrollbar { width: 6px; }
+  .plist::-webkit-scrollbar-thumb { background: var(--faint); border-radius: 3px; }
+  .pitem {
+    display: flex; align-items: center; gap: 10px; padding: 8px 14px; border-radius: 12px;
+    font-size: 13px; color: var(--dim); cursor: pointer; user-select: none;
+    transition: background 120ms ease, color 120ms ease;
+  }
+  .pitem:hover { background: rgba(157, 140, 255, .10); color: var(--txt); }
+  .pitem .ico { color: var(--accent); font-size: 10px; opacity: .7; }
+  .pempty { padding: 28px 16px; color: var(--mute); font-size: 12.5px; text-align: center; }
+  .pfoot { display: flex; gap: 8px; padding: 14px 24px 20px; border-top: 1px solid var(--hair); }
+  .pbtn {
+    flex: 1; padding: 10px 0; text-align: center; border: 1px solid var(--hair); border-radius: 12px;
+    font: 400 12.5px "Segoe UI", sans-serif; color: var(--dim); cursor: pointer; background: transparent;
+    transition: color 140ms ease, border-color 140ms ease, background 140ms ease;
+  }
+  .pbtn:hover { color: var(--txt); border-color: rgba(157, 140, 255, .5); background: rgba(157, 140, 255, .08); }
+  .pbtn.main { background: var(--txt); color: #0a0a14; font-weight: 500; border-color: transparent; }
+  .pbtn.main:hover { background: #fff; }
+  .pbtn.disabled { opacity: .4; pointer-events: none; }
+
+  /* ---------- герой-подпись слева ---------- */
+  .hero { position: fixed; left: 36px; top: 96px; max-width: 460px; z-index: 2; pointer-events: none; }
+  .hero .over { font-size: 11px; letter-spacing: .28em; text-transform: uppercase; color: var(--accent); }
+  .hero .status { margin-top: 10px; font-size: 12.5px; color: var(--dim); max-width: 42ch; }
+  .hero .keys { margin-top: 14px; font-size: 11px; color: var(--mute); }
+  kbd {
+    background: rgba(242, 244, 255, .06); border: 1px solid var(--hair);
+    border-radius: 4px; padding: 0 5px; font: 10.5px var(--mono); color: var(--dim);
+  }
+
+  /* ---------- легенда + фильтры над доком ---------- */
+  .legend {
+    position: fixed; left: 36px; right: 36px; bottom: 136px; z-index: 4;
+    display: flex; flex-wrap: wrap; align-items: center; gap: 8px 22px;
+    font-size: 11.5px; color: var(--dim); letter-spacing: .05em;
+    pointer-events: none;
+  }
+  .legend .grp { display: flex; align-items: center; gap: 16px; flex-wrap: wrap; }
+  .legend .item { display: flex; align-items: center; gap: 7px; white-space: nowrap; }
+  .legend i { width: 6px; height: 6px; border-radius: 50%; flex: none; }
+  .legend .sep { width: 1px; height: 14px; background: var(--hair); }
+  .pill {
+    pointer-events: auto; cursor: pointer; display: inline-flex; align-items: center; gap: 7px;
+    font: inherit; letter-spacing: inherit; color: var(--dim);
+    background: transparent; border: 1px solid var(--hair); border-radius: 999px;
+    padding: 4px 12px;
+    transition: color 140ms ease, border-color 140ms ease, background 140ms ease, opacity 140ms ease;
+  }
+  .pill:hover { color: var(--txt); border-color: rgba(157, 140, 255, .45); }
+  .pill[aria-pressed="true"] { background: rgba(157, 140, 255, .12); border-color: rgba(157, 140, 255, .5); color: var(--txt); }
+  .pill[aria-pressed="false"] { opacity: .45; }
+  .pill.ghost { border-style: dashed; }
+
+  /* ---------- док проектов ---------- */
+  .dock {
+    position: fixed; left: 36px; right: 36px; bottom: 30px; z-index: 5;
+    border: 1px solid var(--hair); border-radius: 20px; padding: 12px 10px;
+    background: rgba(6, 6, 14, .55); backdrop-filter: blur(20px);
+    display: flex; gap: 6px; overflow-x: auto; scrollbar-width: thin;
+    scrollbar-color: var(--faint) transparent;
+  }
+  .dock::-webkit-scrollbar { height: 6px; }
+  .dock::-webkit-scrollbar-thumb { background: var(--faint); border-radius: 3px; }
+  .dock .empty { padding: 18px 16px; color: var(--mute); font-size: 12.5px; }
+  .item {
+    flex: 0 0 172px; padding: 10px 13px 9px; border-radius: 13px; cursor: pointer;
+    transition: background 140ms ease;
+  }
+  .item:hover { background: rgba(157, 140, 255, .08); }
+  .item.active { background: rgba(157, 140, 255, .14); }
+  .item .nm { display: flex; align-items: center; gap: 7px; font-size: 12px; font-weight: 450;
+    white-space: nowrap; overflow: hidden; }
+  .item .nm i { width: 6px; height: 6px; border-radius: 50%; flex: none; }
+  .item .nm span { overflow: hidden; text-overflow: ellipsis; }
+  .item .meta { display: flex; justify-content: space-between; align-items: baseline; margin-top: 6px;
+    font-variant-numeric: tabular-nums; }
+  .item .sc { font-size: 11px; color: var(--dim); }
+  .item .st { font-size: 9px; letter-spacing: .1em; text-transform: uppercase; white-space: nowrap; }
+  .item .track { height: 2px; border-radius: 1px; background: var(--hair); margin-top: 7px; overflow: hidden; }
+  .item .track i { display: block; height: 100%; border-radius: 1px; transition: width 300ms ease; }
+  .st-alive { color: var(--good); } .st-abandoned { color: var(--warn); }
+  .st-broken { color: var(--bad); } .st-unknown { color: var(--mute); }
+
+  /* ---------- карточка проекта ---------- */
+  .detail {
+    position: fixed; right: 36px; top: 96px; width: 340px; z-index: 6;
+    border: 1px solid var(--hair); border-radius: 24px; padding: 26px 26px 22px;
+    background: linear-gradient(160deg, rgba(20, 18, 40, .72), rgba(6, 6, 12, .72));
+    backdrop-filter: blur(22px);
+    box-shadow: 0 30px 80px rgba(0, 0, 0, .55);
+    max-height: calc(100vh - 96px - 150px); overflow-y: auto; scrollbar-width: thin;
+    scrollbar-color: var(--faint) transparent;
+    opacity: 0; transform: translateX(24px); pointer-events: none;
+    transition: opacity 200ms ease, transform 220ms cubic-bezier(.2, .8, .2, 1);
+  }
+  .detail::-webkit-scrollbar { width: 6px; }
+  .detail::-webkit-scrollbar-thumb { background: var(--faint); border-radius: 3px; }
+  .detail.open { opacity: 1; transform: translateX(0); pointer-events: auto; }
+  .detail .kick { font-size: 10px; letter-spacing: .26em; text-transform: uppercase; color: var(--mute); }
+  .detail h2 { font-size: 21px; font-weight: 450; margin: 8px 24px 2px 0; letter-spacing: -.01em; }
+  .detail .path { font-size: 10.5px; color: var(--mute); font-family: var(--mono); margin-bottom: 16px;
+    word-break: break-all; }
+  .detail .close {
+    position: absolute; top: 18px; right: 20px; width: 26px; height: 26px; line-height: 24px;
+    text-align: center; border: 1px solid var(--hair); border-radius: 50%;
+    color: var(--mute); cursor: pointer; font-size: 13px; background: transparent;
+    transition: color 140ms ease, border-color 140ms ease;
+  }
+  .detail .close:hover { color: var(--txt); border-color: rgba(157, 140, 255, .5); }
+  .scoreline { display: flex; align-items: baseline; gap: 10px; }
+  .scoreline .big { font-size: 42px; font-weight: 200; letter-spacing: -.03em; line-height: 1;
+    background: linear-gradient(120deg, #fff 20%, var(--accent) 80%);
+    -webkit-background-clip: text; background-clip: text; color: transparent; }
+  .scoreline .of { color: var(--mute); font-size: 12.5px; }
+  .scoreline .badge { margin-left: auto; font-size: 9.5px; letter-spacing: .14em; text-transform: uppercase;
+    border: 1px solid; border-radius: 999px; padding: 3px 10px; }
+  .meter { height: 3px; border-radius: 2px; background: var(--hair); overflow: hidden; margin: 14px 0 2px; }
+  .meter i { display: block; height: 100%; border-radius: 2px; }
+  .facts { margin-top: 14px; border-top: 1px solid var(--hair); }
+  .fact { display: flex; justify-content: space-between; gap: 16px; padding: 8px 0;
+    border-bottom: 1px solid var(--hair); font-size: 12.5px; }
+  .fact span:first-child { color: var(--mute); flex: none; }
+  .fact span:last-child { text-align: right; font-variant-numeric: tabular-nums; word-break: break-word; }
+  .why { list-style: none; margin: 12px 0 0; padding: 0; }
+  .why li { font-size: 12px; color: var(--dim); padding-left: 15px; position: relative; margin: 4px 0; }
+  .why li::before { content: "‣"; position: absolute; left: 0; color: var(--bad); }
+  .why.bonus li::before { content: "+"; color: var(--good); }
   .warnbox {
-    margin-top: var(--s3); padding: var(--s2) var(--s3);
-    border: 1px solid rgba(248,113,113,.5); border-radius: 8px;
-    background: rgba(60,14,20,.5); color: #fca5a5; font-size: 12px;
+    margin-top: 12px; padding: 9px 12px; border: 1px solid rgba(255, 122, 144, .4); border-radius: 12px;
+    background: rgba(255, 122, 144, .07); color: #ffc9d3; font-size: 12px;
   }
-  .spark { width: 100%; height: 44px; margin-top: var(--s3); display: block; }
-  .muted { color: var(--text-mute); }
-  .small { font-size: 11px; }
-  .rootbar { display: flex; gap: var(--s2); margin-top: var(--s3); align-items: center; }
-  .rootbar select, .rootbar input {
-    font: inherit; font-size: 12px; color: var(--text);
-    background: rgba(255,255,255,.04); border: 1px solid var(--panel-border);
-    border-radius: 8px; padding: var(--s2) var(--s3); outline: none;
-    transition: border-color 120ms ease, background 120ms ease;
+  .junkrow { display: flex; align-items: center; gap: 12px; padding: 5px 0; font-size: 12px; }
+  .junkrow span:first-child { flex: 1; font-family: var(--mono); font-size: 11.5px; }
+  .junkrow .bytes { color: var(--mute); font-variant-numeric: tabular-nums; }
+  .junkrow button {
+    font: 400 10px "Segoe UI", sans-serif; letter-spacing: .1em; text-transform: uppercase;
+    color: var(--bad); background: transparent; border: 1px solid rgba(255, 122, 144, .35);
+    border-radius: 8px; padding: 4px 10px; cursor: pointer;
+    transition: background 140ms ease, border-color 140ms ease;
   }
-  .rootbar select:hover, .rootbar input:hover { background: rgba(255,255,255,.07); }
-  .rootbar select:focus, .rootbar input:focus { border-color: rgba(125,211,252,.5); }
-  .rootbar select { max-width: 200px; cursor: pointer; }
-  .rootbar input { flex: 1; min-width: 0; font-family: Consolas, "Cascadia Mono", monospace; }
-  .actions { display: flex; flex-wrap: wrap; gap: var(--s2); margin-top: var(--s4); }
-  button {
-    font: inherit; font-size: 13px; cursor: pointer; padding: var(--s2) var(--s3);
-    border-radius: 8px; border: 1px solid var(--panel-border);
-    background: rgba(255,255,255,.04); color: var(--text);
-    transition: background 120ms ease, border-color 120ms ease, transform 60ms ease;
+  .junkrow button:hover { background: rgba(255, 122, 144, .12); border-color: rgba(255, 122, 144, .6); }
+  .junkrow button[disabled] { opacity: .4; cursor: not-allowed; }
+  .spark { width: 100%; height: 40px; margin-top: 12px; display: block; }
+  .detail .acts { display: grid; grid-template-columns: 1fr 1fr; gap: 8px; margin-top: 16px; }
+  .abtn {
+    padding: 9px 0; text-align: center; border: 1px solid var(--hair); border-radius: 12px;
+    font-size: 12px; color: var(--dim); cursor: pointer; user-select: none;
+    transition: color 140ms ease, border-color 140ms ease, background 140ms ease, opacity 140ms ease;
   }
-  button:hover { background: rgba(125,211,252,.14); border-color: rgba(125,211,252,.45); }
-  button:active { transform: translateY(1px); }
-  button[disabled] { opacity: .45; cursor: not-allowed; }
+  .abtn:hover { color: var(--txt); border-color: rgba(157, 140, 255, .5); background: rgba(157, 140, 255, .08); }
+  .abtn:active { transform: translateY(1px); }
+  .abtn.main { background: var(--txt); color: #0a0a14; font-weight: 500; border-color: transparent; }
+  .abtn.main:hover { background: #fff; color: #0a0a14; }
+  .abtn[disabled], .abtn.disabled { opacity: .4; pointer-events: none; }
+  .doctorrow { display: flex; justify-content: space-between; gap: 12px; padding: 5px 0; font-size: 12px;
+    border-bottom: 1px solid var(--hair); }
+  .doctorrow span:first-child { color: var(--dim); }
+  .doctorrow span:last-child { color: var(--mute); text-align: right; }
+
+  /* ---------- тултип / статус / ошибка ---------- */
   #tip {
-    position: fixed; pointer-events: none; opacity: 0; transform: translate(-50%, -140%);
-    background: rgba(8,12,20,.92); border: 1px solid var(--panel-border); border-radius: 8px;
-    padding: var(--s2) var(--s3); font-size: 12px; transition: opacity 90ms ease; max-width: 32ch;
+    position: fixed; z-index: 9; pointer-events: none; opacity: 0; transform: translate(-50%, -150%);
+    background: rgba(6, 6, 14, .85); border: 1px solid var(--hair); border-radius: 12px;
+    backdrop-filter: blur(12px); padding: 8px 13px; font-size: 12px;
+    transition: opacity 90ms ease; max-width: 34ch;
   }
-  #tip small { display: block; color: var(--text-mute); font-size: 11px; }
-  #status { position: fixed; left: 50%; bottom: var(--s6); transform: translateX(-50%); color: var(--text-mute); font-size: 12px; }
-  kbd { background: rgba(255,255,255,.06); border: 1px solid var(--panel-border); border-radius: 4px; padding: 0 var(--s1); font-size: 11px; }
+  #tip small { display: block; color: var(--mute); font-size: 11px; margin-top: 2px; }
   #error {
-    position: fixed; inset: auto 0 40% 0; margin: 0 auto; width: max-content; max-width: 80vw;
-    padding: var(--s4); border-radius: var(--radius); background: rgba(60,14,20,.92);
-    border: 1px solid rgba(248,113,113,.5); display: none;
+    position: fixed; z-index: 10; inset: auto 0 45% 0; margin: 0 auto; width: max-content; max-width: 70vw;
+    padding: 22px 26px; border: 1px solid rgba(255, 122, 144, .4); border-radius: 20px;
+    background: rgba(20, 8, 12, .9); backdrop-filter: blur(16px); display: none;
+  }
+  #error .btn {
+    display: inline-block; margin-top: 14px; padding: 8px 18px; border: 1px solid var(--hair);
+    border-radius: 999px; cursor: pointer; font-size: 12px;
   }
 </style>
 </head>
 <body>
+<div id="cosmos" aria-hidden="true">
+  <div class="plx p0">
+    <div class="nebula n1"></div>
+    <div class="nebula n2"></div>
+    <div class="nebula n3"></div>
+    <div class="nebula n4"></div>
+  </div>
+  <div class="plx p1"><div class="starfield sf1"></div></div>
+  <div class="plx p2"><div class="starfield sf2"></div></div>
+  <div class="plx p3"><div class="starfield sf3"></div></div>
+  <div class="meteor m1"></div>
+  <div class="meteor m2"></div>
+  <div class="meteor m3"></div>
+  <div class="meteor m4"></div>
+  <div id="cosmosGlow"></div>
+</div>
 <canvas id="sky"></canvas>
 
-<div class="hud top-left">
-  <div class="card">
-    <h1>Project Butler <span>// галактика проектов</span></h1>
-    <div class="sub" id="root">загрузка…</div>
-    <div class="stats" id="stats"></div>
-    <div class="chips" id="chips"></div>
-    <div class="rootbar">
-      <select id="rootSelect" title="Известные папки сканирования"></select>
-      <input id="rootInput" type="text" placeholder="D:\Projects" spellcheck="false" autocomplete="off"
-             title="Путь к папке с проектами">
-      <button id="rootApply" title="Просканировать выбранную папку">ОК</button>
-    </div>
+<header class="top">
+  <div class="wordmark">Project <em>Butler</em></div>
+  <div class="topmeta" id="stats"></div>
+  <div class="rootbox">
+    <input id="rootInput" list="rootList" type="text" placeholder="D:\Projects"
+           spellcheck="false" autocomplete="off" title="Папка с проектами">
+    <datalist id="rootList"></datalist>
+    <button id="browseBtn" title="Выбрать папку на диске">обзор</button>
+    <button id="rootApply" title="Просканировать папку">скан</button>
   </div>
-  <div class="legend" id="legend"></div>
+</header>
+
+<div class="hero">
+  <div class="over" id="root">инициализация…</div>
+  <div class="status" id="status"></div>
+  <div class="keys">мышь — вращать · колесо — зум · клик — карточка · двойной клик — папка ·
+    <kbd>R</kbd> — рескан · <kbd>Esc</kbd> — сброс</div>
 </div>
 
-<div id="panel" class="card"></div>
+<aside id="detail" class="detail"></aside>
 
-<div class="hud bottom-left">
-  <div class="card" style="padding:12px 16px">
-    <div class="sub">мышь — вращать · колесо — зум · клик — карточка · двойной клик — открыть папку ·
-      <kbd>R</kbd> — пересканировать · <kbd>Esc</kbd> — сброс вида ·
-      <span style="color:#f472b6">- - -</span> — похожие проекты</div>
-  </div>
-</div>
+<div class="legend" id="legend"></div>
+<div class="dock" id="dock"></div>
 
 <div id="tip"></div>
-<div id="status">инициализация…</div>
-<div id="error" class="card"></div>
+<div id="error"></div>
+
+<div id="picker" class="picker">
+  <div class="pbox" role="dialog" aria-label="Выбор папки сканирования">
+    <div class="phead">
+      <div class="pkick">папка сканирования</div>
+      <div class="ppath" id="pickPath"></div>
+      <button class="pclose" id="pickClose" title="закрыть (Esc)">×</button>
+    </div>
+    <div class="pdrives" id="pickDrives"></div>
+    <div class="plist" id="pickList"></div>
+    <div class="pfoot">
+      <button class="pbtn" id="pickUp">↑ выше</button>
+      <button class="pbtn main" id="pickScan">сканировать эту папку</button>
+    </div>
+  </div>
+</div>
 
 <script src="/ui/galaxy.js"></script>
 </body>

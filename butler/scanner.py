@@ -129,15 +129,28 @@ def _git_activity(path) -> float:
     return best
 
 
+def _is_dir(path) -> bool:
+    """is_dir() без сюрпризов: pathlib бросает PermissionError на джанкшенах
+    вроде 'C:\\Documents and Settings' (WinError 5), а не возвращает False."""
+    try:
+        return path.is_dir()
+    except OSError:
+        return False
+
+
 def scan(root) -> list:
     """Сканирует непосредственные подпапки root, возвращает список Project."""
     root = Path(root)
+    try:
+        children = sorted(root.iterdir())
+    except OSError as exc:
+        raise RuntimeError(f"Корень не читается: {exc}") from exc
     found = []
-    for child in sorted(root.iterdir()):
+    for child in children:
         # Симлинки не преследуем: не уходим в чужие деревья через ссылки/джанкшены
         if child.is_symlink():
             continue
-        if not child.is_dir() or child.name.startswith(".") or child.name in SKIP_NAMES:
+        if not _is_dir(child) or child.name.startswith(".") or child.name in SKIP_NAMES:
             continue
         try:
             entries = list(child.iterdir())
@@ -214,7 +227,7 @@ def scan(root) -> list:
         nested = facts.get("nested_root")
         if nested:
             candidate = child / nested
-            if candidate.is_dir():
+            if _is_dir(candidate):
                 code_root = candidate
 
         tree = project_facts(code_root)
