@@ -31,6 +31,12 @@
   #sky { position: fixed; inset: 0; display: block; cursor: grab; }
   #sky.dragging { cursor: grabbing; }
 
+  /* кинематографичная виньетка: края кадра уходят в темноту объектива */
+  body::after {
+    content: ""; position: fixed; inset: 0; pointer-events: none; z-index: 1;
+    background: radial-gradient(120% 95% at 50% 44%, transparent 55%, rgba(0, 0, 0, .38) 100%);
+  }
+
   /* ---------- живой космос под галактикой ---------- */
   #cosmos {
     position: fixed; inset: 0; overflow: hidden; pointer-events: none;
@@ -278,7 +284,27 @@
     pointer-events: none;
   }
   .legend .grp { display: flex; align-items: center; gap: 16px; flex-wrap: wrap; }
-  .legend .item { display: flex; align-items: center; gap: 7px; white-space: nowrap; }
+  .legend .item { display: flex; align-items: center; gap: 7px; white-space: nowrap;
+    pointer-events: auto; cursor: pointer; }
+
+  /* поиск-затмение */
+  .searchbox {
+    width: 170px; font: 11.5px var(--mono); color: var(--txt);
+    background: rgba(242, 244, 255, .05); border: 1px solid var(--hair);
+    border-radius: 10px; padding: 7px 12px; outline: none;
+    transition: border-color 140ms ease, background 140ms ease, width 220ms cubic-bezier(.2, .8, .2, 1);
+  }
+  .searchbox::placeholder { color: var(--mute); }
+  .searchbox:hover { background: rgba(242, 244, 255, .08); }
+  .searchbox:focus { border-color: rgba(157, 140, 255, .55); width: 230px; }
+
+  /* плёночное зерно поверх всего — «снято в реальности», а не отрисовано */
+  body::before {
+    content: ""; position: fixed; inset: 0; pointer-events: none; z-index: 8;
+    opacity: .05; mix-blend-mode: overlay;
+    background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='180' height='180'%3E%3Cfilter id='n'%3E%3CfeTurbulence type='fractalNoise' baseFrequency='0.9' numOctaves='2'/%3E%3C/filter%3E%3Crect width='180' height='180' filter='url(%23n)'/%3E%3C/svg%3E");
+    background-size: 180px 180px;
+  }
   .legend i { width: 6px; height: 6px; border-radius: 50%; flex: none; }
   .legend .sep { width: 1px; height: 14px; background: var(--hair); }
   .pill {
@@ -328,6 +354,20 @@
     from { opacity: 0; transform: translateY(18px) scale(.94); }
   }
   .item.enter { animation: dockRise .55s cubic-bezier(.2, .8, .2, 1) backwards; }
+
+  /* фоновый скан: статус и вордмарк «дышат», пока сервер ходит по диску */
+  body.scanning .status { color: var(--txt); }
+  body.scanning .status::before {
+    content: ""; display: inline-block; width: 8px; height: 8px; border-radius: 50%;
+    background: var(--accent); margin-right: 9px; vertical-align: 1px;
+    box-shadow: 0 0 12px var(--accent); animation: scanPulse 1.1s ease-in-out infinite;
+  }
+  body.scanning .wordmark em { animation: scanPulse 1.1s ease-in-out infinite; }
+  body.scanning .top { border-bottom-color: rgba(157, 140, 255, .35); }
+  @keyframes scanPulse {
+    0%, 100% { opacity: .25; transform: scale(.75); }
+    50% { opacity: 1; transform: scale(1.2); }
+  }
   .item .nm { display: flex; align-items: center; gap: 7px; font-size: 12px; font-weight: 450;
     white-space: nowrap; overflow: hidden; }
   .item .fold { width: 14px; height: 14px; flex: none; filter: drop-shadow(0 0 4px rgba(157, 140, 255, .35)); }
@@ -345,8 +385,43 @@
   .item .st { font-size: 9px; letter-spacing: .1em; text-transform: uppercase; white-space: nowrap; }
   .item .track { height: 2px; border-radius: 1px; background: var(--hair); margin-top: 7px; overflow: hidden; }
   .item .track i { display: block; height: 100%; border-radius: 1px; transition: width 300ms ease; }
+  .item.hit { border-color: rgba(110, 231, 255, .5); box-shadow: 0 0 14px rgba(110, 231, 255, .15); }
   .st-alive { color: var(--good); } .st-abandoned { color: var(--warn); }
   .st-broken { color: var(--bad); } .st-unknown { color: var(--mute); }
+
+  /* ---------- теги, заметка, логи в карточке ---------- */
+  .tagrow { display: flex; flex-wrap: wrap; gap: 6px; align-items: center; margin-top: 14px; }
+  .tagchip {
+    display: inline-flex; align-items: center; gap: 6px; padding: 3px 10px;
+    border: 1px solid rgba(157, 140, 255, .4); border-radius: 999px;
+    font-size: 11px; color: var(--txt); background: rgba(157, 140, 255, .12);
+  }
+  .tagchip i { cursor: pointer; color: var(--mute); font-style: normal; }
+  .tagchip i:hover { color: var(--bad); }
+  .taginput {
+    width: 90px; font: 11px var(--mono); color: var(--txt);
+    background: transparent; border: 1px dashed var(--hair); border-radius: 999px;
+    padding: 3px 10px; outline: none;
+  }
+  .taginput:focus { border-color: rgba(157, 140, 255, .5); }
+  .notebox {
+    width: 100%; min-height: 52px; margin-top: 10px; padding: 9px 12px;
+    font: 12px/1.5 var(--mono); color: var(--txt); resize: vertical;
+    background: rgba(242, 244, 255, .04); border: 1px solid var(--hair);
+    border-radius: 12px; outline: none;
+    transition: border-color 140ms ease;
+  }
+  .notebox:focus { border-color: rgba(157, 140, 255, .5); }
+  .notebox::placeholder { color: var(--mute); }
+  .runlog {
+    margin-top: 12px; padding: 10px 12px; max-height: 150px; overflow-y: auto;
+    font: 11px/1.55 var(--mono); color: var(--dim); white-space: pre-wrap;
+    word-break: break-word;
+    background: rgba(0, 0, 0, .45); border: 1px solid var(--hair); border-radius: 12px;
+    scrollbar-width: thin; scrollbar-color: var(--faint) transparent;
+  }
+  .runlog .err { color: var(--bad); }
+  .abtn.going { border-color: rgba(157, 140, 255, .55); color: var(--accent); }
 
   /* ---------- карточка проекта ---------- */
   .detail {
@@ -478,11 +553,14 @@
 
 <header class="top">
   <div class="wordmark">Project <em>Butler</em></div>
+  <input id="searchInput" class="searchbox" type="text" placeholder="⌕  поиск — /"
+         spellcheck="false" autocomplete="off" title="Фильтр по имени и стеку; / — фокус">
   <div class="topmeta" id="stats"></div>
   <div class="rootbox">
     <input id="rootInput" list="rootList" type="text" placeholder="D:\Projects"
            spellcheck="false" autocomplete="off" title="Папка с проектами">
     <datalist id="rootList"></datalist>
+    <button id="digestBtn" title="Что изменилось с прошлого скана">дайджест</button>
     <button id="browseBtn" title="Выбрать папку на диске">обзор</button>
     <button id="rootApply" title="Просканировать папку">скан</button>
   </div>
@@ -492,7 +570,7 @@
   <div class="over" id="root">инициализация…</div>
   <div class="status" id="status"></div>
   <div class="keys">мышь — вращать · колесо — зум · клик — карточка · двойной клик — папка ·
-    <kbd>R</kbd> — рескан · <kbd>Esc</kbd> — сброс</div>
+    <kbd>/</kbd> — поиск · <kbd>R</kbd> — рескан · <kbd>Esc</kbd> — сброс</div>
 </div>
 
 <aside id="detail" class="detail"></aside>
@@ -502,6 +580,17 @@
 
 <div id="tip"></div>
 <div id="error"></div>
+
+<div id="digest" class="picker">
+  <div class="pbox" role="dialog" aria-label="Дайджест изменений">
+    <div class="phead">
+      <div class="pkick">дайджест · что изменилось</div>
+      <div class="ppath" id="digestMeta"></div>
+      <button class="pclose" id="digestClose" title="закрыть (Esc)">×</button>
+    </div>
+    <div class="plist" id="digestBody"></div>
+  </div>
+</div>
 
 <div id="picker" class="picker">
   <div class="pbox" role="dialog" aria-label="Выбор папки сканирования">

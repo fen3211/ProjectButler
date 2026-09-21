@@ -8,17 +8,18 @@ import subprocess
 import sys
 import threading
 import webbrowser
+from collections import deque
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
 from urllib.parse import parse_qs, urlsplit
 
-from . import config
+from . import config, resurrect as resurrect_mod, runner
 from .disk import JUNK_DIRS
 from .doctor import diagnose
 from .index import build_feed, read_feed, summarize, write_feed, node as galaxy_node
 from .scanner import scan
-from .store import (diff_scans, history_for, list_projects, norm_root,
-                    save_projects)
+from .store import (all_meta, diff_scans, get_meta, history_for, list_projects, norm_root,
+                    prev_scores, save_projects, set_note, set_tags)
 
 UI_DIR = Path(__file__).resolve().parent.parent / "ui"
 STATIC_TYPES = {
@@ -97,6 +98,103 @@ class ScanState:
             return {"running": self.running, "root": self.root, "error": self.error}
 
 
+class ResurrectState:
+    """Один воскрешающий поток за раз: этапы и лог читает UI через /api/resurrect-status."""
+
+    def __init__(self):
+        self._lock = threading.Lock()
+        self.running = False
+        self.path = None
+        self.stage = ""
+        self.log = deque(maxlen=120)
+        self.error = None
+
+    def start(self, path, work) -> bool:
+        with self._lock:
+            if self.running:
+                return False
+            self.running = True
+            self.path = path
+            self.stage = "старт"
+            self.log.clear()
+            self.error = None
+
+        def run():
+            try:
+                work(self._say)
+            except Exception as exc:                    # noqa: BLE001 — статус уйдёт в UI
+                self.error = f"воскрешение не удалось: {exc}"
+            finally:
+                with self._lock:
+                    self.running = False
+
+        threading.Thread(target=run, daemon=True).start()
+        return True
+
+    def _say(self, text, stage=None):
+        with self._lock:
+            self.log.append(str(text))
+            if stage:
+                self.stage = stage
+
+    def snapshot(self) -> dict:
+        with self._lock:
+            return {"running": self.running, "path": self.path, "stage": self.stage,
+                    "log": list(self.log)[-40:], "error": self.error}
+
+
+class RunRegistry:
+    """Запущенные процессы проектов: путь -> {proc, cmd, log}. Лог копится фоновым читателем."""
+
+    def __init__(self):
+        self._lock = threading.Lock()
+        self.procs = {}
+
+    def start(self, path, cmd) -> dict:
+        with self._lock:
+            old = self.procs.get(path)
+            if old and old["proc"].poll() is None:
+                return {"error": "этот проект уже запущен — сначала останови"}
+            log = deque(maxlen=200)
+            try:
+                proc = subprocess.Popen(
+                    cmd, cwd=str(path), stdout=subprocess.PIPE, stderr=subprocess.STDOUT,
+                    text=True, encoding="utf-8", errors="replace",
+                    creationflags=getattr(subprocess, "CREATE_NO_WINDOW", 0))
+            except OSError as exc:
+                return {"error": f"не запустилось: {exc}"}
+            self.procs[path] = {"proc": proc, "cmd": cmd, "log": log, "exit": None}
+
+        def pump():
+            for line in proc.stdout:
+                with self._lock:
+                    log.append(str(line).rstrip()[:160])
+            with self._lock:
+                entry = self.procs.get(path)
+                if entry and entry["proc"] is proc:
+                    entry["exit"] = proc.wait()
+
+        threading.Thread(target=pump, daemon=True).start()
+        return {"pid": proc.pid, "cmd": cmd}
+
+    def snapshot(self, path) -> dict:
+        with self._lock:
+            entry = self.procs.get(path)
+            if not entry:
+                return {"running": False}
+            running = entry["proc"].poll() is None
+            return {"running": running, "cmd": entry["cmd"],
+                    "log": list(entry["log"])[-40:], "exit": entry["exit"]}
+
+    def stop(self, path) -> bool:
+        with self._lock:
+            entry = self.procs.get(path)
+            if not entry or entry["proc"].poll() is not None:
+                return False
+            entry["proc"].terminate()
+            return True
+
+
 class ButlerHTTPServer(ThreadingHTTPServer):
     """На Windows http.server разрешает двойной биндинг порта (allow_reuse_address=1).
     Нам второй экземпляр не нужен никогда — пусть громко падает при старте."""
@@ -106,6 +204,8 @@ class ButlerHTTPServer(ThreadingHTTPServer):
     def __init__(self, *args, **kwargs):
         super().__init__(*args, **kwargs)
         self.butler_scan = ScanState()
+        self.butler_resurrect = ResurrectState()
+        self.butler_runs = RunRegistry()
 
 
 def _list_drives() -> list:
@@ -212,7 +312,38 @@ class ButlerHandler(BaseHTTPRequestHandler):
             return self._static(os.path.basename(path))
         if path == "/galaxy.json":
             feed = read_feed(config.FEED_PATH)
-            return self._json(feed if feed is not None else self._rebuild_feed())
+            if feed is None:
+                feed = self._rebuild_feed()
+            feed["prev"] = prev_scores(norm_root(self.root))   # score с прошлого скана — для сверхновых
+            feed["meta"] = all_meta()                          # теги и заметки — для фильтров и карточек
+            return self._json(feed)
+        if path == "/api/meta":
+            target = (parse_qs(urlsplit(self.path).query).get("path") or [""])[0]
+            if not _within(target, self.root):
+                return self._error(403, "Путь вне корня сканирования — отказ")
+            return self._json({"path": target, **get_meta(target)})
+        if path == "/api/search":
+            q = (parse_qs(urlsplit(self.path).query).get("q") or [""])[0].strip().lower()
+            return self._json({"q": q, "results": self._search_content(q)})
+        if path == "/api/digest":
+            return self._json(self._digest())
+        if path == "/api/feed-version":
+            try:
+                mtime = os.path.getmtime(config.FEED_PATH)
+            except OSError:
+                mtime = 0.0
+            return self._json({"mtime": mtime, "root": self.root})
+        if path == "/api/resurrect-status":
+            target = (parse_qs(urlsplit(self.path).query).get("path") or [""])[0]
+            snap = self.server.butler_resurrect.snapshot()
+            if target and snap["path"] and norm_root(target) != snap["path"]:
+                snap = {"running": False}                      # спросили про другой проект
+            return self._json(snap)
+        if path == "/api/run-status":
+            target = (parse_qs(urlsplit(self.path).query).get("path") or [""])[0]
+            if not _within(target, self.root):
+                return self._error(403, "Путь вне корня сканирования — отказ")
+            return self._json(self.server.butler_runs.snapshot(target))
         if path == "/api/health":
             return self._json({"ok": True, "root": self.root, "feed": str(config.FEED_PATH)})
         if path == "/api/projects":
@@ -294,8 +425,7 @@ class ButlerHandler(BaseHTTPRequestHandler):
             target = args.get("path") or ""
             if not _within(target, self.root):
                 return self._error(403, "Путь вне корня сканирования — отказ")
-            rec = next((r for r in list_projects(norm_root(self.root))
-                        if r["path"] == target), None)
+            rec = self._rec_for(target)
             if rec is None:
                 return self._error(404, "Проект не найден в базе — пересканируй")
             return self._json({"ok": True, "project": rec["name"], "checks": diagnose(rec)})
@@ -303,7 +433,114 @@ class ButlerHandler(BaseHTTPRequestHandler):
             return self._git_init(args)
         if path == "/api/clean":
             return self._clean_junk(args)
+        if path == "/api/tags":
+            target = str(args.get("path") or "")
+            if not _within(target, self.root):
+                return self._error(403, "Путь вне корня сканирования — отказ")
+            tags = set_tags(target, args.get("tags") or [])
+            return self._json({"ok": True, "path": target, "tags": tags})
+        if path == "/api/note":
+            target = str(args.get("path") or "")
+            if not _within(target, self.root):
+                return self._error(403, "Путь вне корня сканирования — отказ")
+            note = set_note(target, args.get("note") or "")
+            return self._json({"ok": True, "path": target, "note": note})
+        if path == "/api/resurrect":
+            target = str(args.get("path") or "")
+            if not _within(target, self.root):
+                return self._error(403, "Путь вне корня сканирования — отказ")
+            if not os.path.isdir(target):
+                return self._error(400, f"Папка не найдена: {target}")
+            rec = self._rec_for(target)
+            if rec is None:
+                return self._error(404, "Проект не найден в базе — пересканируй")
+            if args.get("confirm") is not True:
+                return self._json({"ok": True, "plan": resurrect_mod.plan(target, rec["stacks"])})
+            stacks = rec.get("stacks", []) or []
+            root = target
+            state = self.server.butler_resurrect
+            if not state.start(norm_root(target),
+                               lambda log: resurrect_mod.resurrect(root, stacks, log)):
+                return self._error(409, "Воскрешение уже идёт — дождись окончания")
+            return self._json({"ok": True, "path": target, "running": True})
+        if path == "/api/run":
+            target = str(args.get("path") or "")
+            if not _within(target, self.root):
+                return self._error(403, "Путь вне корня сканирования — отказ")
+            rec = self._rec_for(target)
+            if args.get("confirm") is not True:
+                plan = runner.detect_command(target, rec.get("stacks", [])) if rec else None
+                return self._json({"ok": True, "cmd": plan["cmd"] if plan else None,
+                                   "kind": plan["kind"] if plan else None})
+            cmd = args.get("cmd")
+            if not cmd:
+                plan = runner.detect_command(target, rec.get("stacks", [])) if rec else None
+                if not plan:
+                    return self._error(400, "Не понял, чем запускать проект — запусти вручную")
+                cmd = plan["cmd"]
+            result = self.server.butler_runs.start(target, cmd)
+            if "error" in result:
+                return self._error(409, result["error"])
+            return self._json({"ok": True, "path": target, **result})
+        if path == "/api/run-stop":
+            target = str(args.get("path") or "")
+            if not _within(target, self.root):
+                return self._error(403, "Путь вне корня сканирования — отказ")
+            if self.server.butler_runs.stop(target):
+                return self._json({"ok": True, "path": target, "stopped": True})
+            return self._error(404, "Запущенного процесса этого проекта нет")
         return self._error(404, f"Нет такого маршрута: {path}")
+
+    # ---------- чтение для API ----------
+
+    def _rec_for(self, target):
+        """Запись проекта по пути; прямые слеши нормализуем, иначе база не узнает свой проект."""
+        want = norm_root(target)
+        return next((r for r in list_projects(norm_root(self.root))
+                     if r["path"] == want), None)
+
+    def _search_content(self, q):
+        """Поиск по имени, стеку, зависимостям и README — то, чего нет в локальном фильтре."""
+        if len(q) < 2:
+            return []
+        out = []
+        for rec in list_projects(norm_root(self.root)):
+            name = rec.get("name", "")
+            stacks = " ".join(rec.get("stacks", []) or []).lower()
+            facts = rec.get("facts") or {}
+            deps = [str(d).lower() for d in (facts.get("deps") or [])]
+            where = None
+            if q in name.lower():
+                where = "имя"
+            elif q in stacks:
+                where = "стек"
+            elif any(q in d for d in deps):
+                where = "зависимости: " + ", ".join(d for d in deps if q in d)[:80]
+            elif rec.get("has_readme"):
+                try:
+                    with open(os.path.join(rec["path"], "README.md"), "r",
+                              encoding="utf-8", errors="replace") as fh:
+                        head = fh.read(4096).lower()
+                    if q in head:
+                        where = "README"
+                except OSError:
+                    pass
+            if where:
+                out.append({"name": name, "path": rec["path"], "where": where})
+            if len(out) >= 20:
+                break
+        return out
+
+    def _digest(self):
+        """Что изменилось с прошлого скана + пара цифр для контекста."""
+        root = norm_root(self.root)
+        records = list_projects(root)
+        junk = sum(int(((r.get("facts") or {}).get("disk") or {}).get("junk", 0) or 0)
+                   for r in records)
+        secrets = sum(int((r.get("facts") or {}).get("secret_count", 0) or 0) for r in records)
+        todos = sum(int(r.get("todo_count", 0) or 0) for r in records)
+        return {"root": root, "projects": len(records), "junk_bytes": junk,
+                "secrets": secrets, "todos": todos, "diff": diff_scans(root)}
 
     # ---------- действия (мутируют диск) ----------
     def _git_init(self, args):
@@ -317,8 +554,7 @@ class ButlerHandler(BaseHTTPRequestHandler):
         git = shutil.which("git")
         if not git:
             return self._error(500, "git не найден в PATH")
-        rec = next((r for r in list_projects(norm_root(self.root))
-                    if r["path"] == target), None)
+        rec = self._rec_for(target)
         stacks = (rec or {}).get("stacks", [])
         ignore = GITIGNORE_COMMON + "".join(GITIGNORE_TEMPLATES.get(st, "") for st in stacks)
         gitignore = Path(target) / ".gitignore"

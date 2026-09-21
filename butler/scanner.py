@@ -233,6 +233,13 @@ def scan(root) -> list:
         tree = project_facts(code_root)
         for key, value in tree.items():
             facts.setdefault(key, value)
+        # .env.example часто лежит в корне проекта, а не во вложенном code_root —
+        # иначе честный проект вечно платит штраф «окружение не задокументировано»
+        if not facts.get("has_env_example"):
+            top = project_facts(child)
+            facts["env_examples"] = facts.get("env_examples") or top["env_examples"]
+            facts["marker_names"] = facts.get("marker_names") or top["marker_names"]
+            facts["has_env_example"] = bool(top["has_env_example"])
         sources = scan_sources(child)
         facts["source_scan"] = {
             "code_files": sources["code_files"],

@@ -321,9 +321,9 @@ class McpProtocol(unittest.TestCase):
         self.assertIn("tools", init["capabilities"])
 
         tools = {t["name"]: t for t in by_id[2]["result"]["tools"]}
-        self.assertEqual(len(tools), 13)
+        self.assertEqual(len(tools), 14)
         for required in ("butler_disk", "butler_dupes", "butler_secrets",
-                         "butler_doctor", "butler_diff"):
+                         "butler_doctor", "butler_diff", "butler_tags"):
             self.assertIn(required, tools)
         self.assertIn("inputSchema", tools["butler_project"])
 
@@ -503,6 +503,122 @@ class BrowseTest(unittest.TestCase):
         else:
             self.assertIn("error", webserver._browse("Q:"))
             self.assertIn("error", webserver._browse("Q:\\"))
+
+
+class PrevScoresTest(unittest.TestCase):
+    """prev_scores: со второго скана отдаёт прошлые score, с одного — пусто."""
+
+    def setUp(self):
+        self.tmp = tempfile.TemporaryDirectory()
+        self.root = Path(self.tmp.name).resolve()
+        make_project(self.root, "Alpha", {"README.md": "# A", "requirements.txt": "requests"})
+
+    def tearDown(self):
+        self.tmp.cleanup()
+
+    def test_two_scans_give_previous_scores(self):
+        with mock.patch.object(store, "DB_PATH", Path(self.tmp.name) / "prev.db"):
+            store.save_projects(scan(self.root), str(self.root))
+            store.save_projects(scan(self.root), str(self.root))
+            prev = store.prev_scores(str(self.root))
+            self.assertTrue(prev)
+            for path, score in prev.items():
+                hist = store.history_for(path)
+                self.assertEqual(len(hist), 2)
+                self.assertEqual(score, hist[-1]["score"])   # prev — это более старый снапшот
+
+    def test_single_scan_gives_empty(self):
+        with mock.patch.object(store, "DB_PATH", Path(self.tmp.name) / "prev2.db"):
+            store.save_projects(scan(self.root), str(self.root))
+            self.assertEqual(store.prev_scores(str(self.root)), {})
+
+
+class TagsMetaTest(unittest.TestCase):
+    """Теги и заметки: roundtrip в sqlite, нормализация ввода."""
+
+    def setUp(self):
+        self.tmp = tempfile.TemporaryDirectory()
+        self.root = Path(self.tmp.name).resolve()
+        make_project(self.root, "Alpha", {"README.md": "# A", "requirements.txt": "requests"})
+
+    def tearDown(self):
+        self.tmp.cleanup()
+
+    def test_tags_roundtrip_and_normalize(self):
+        with mock.patch.object(store, "DB_PATH", Path(self.tmp.name) / "meta.db"):
+            path = str(self.root / "Alpha")
+            self.assertEqual(store.get_meta(path), {"tags": [], "note": ""})
+            tags = store.set_tags(path, ["работа", " Smoke ", "работа", "", "x" * 40])
+            self.assertEqual(tags, ["работа", "Smoke", "x" * 24])   # дубли и мусор отрезаны
+            self.assertEqual(store.get_meta(path)["tags"], tags)
+            store.set_note(path, "  доделать авторизацию  ")
+            self.assertEqual(store.get_meta(path)["note"], "доделать авторизацию")
+            # note не затирает теги и наоборот
+            self.assertEqual(store.get_meta(path)["tags"], tags)
+
+
+class ResurrectTest(unittest.TestCase):
+    """Парсер env-переменных и генерация .env.example."""
+
+    def setUp(self):
+        self.tmp = tempfile.TemporaryDirectory()
+        self.root = Path(self.tmp.name).resolve()
+
+    def tearDown(self):
+        self.tmp.cleanup()
+
+    def test_find_env_names_and_generate(self):
+        from butler import resurrect
+        src = self.root / "bot.py"
+        src.write_text(
+            "import os\n"
+            "TOKEN = os.getenv('BOT_TOKEN')\n"
+            'KEY = os.environ["OPENAI_KEY"]\n'
+            "TIMEOUT = os.getenv('BOT_TOKEN', '5')\n"
+            "import json\n", encoding="utf-8")
+        names = resurrect.find_env_names(str(self.root))
+        self.assertEqual(names, ["BOT_TOKEN", "OPENAI_KEY"])   # дубликаты схлопнуты
+        gen = resurrect.generate_env_example(str(self.root))
+        self.assertEqual(gen, names)
+        text = (self.root / ".env.example").read_text(encoding="utf-8")
+        self.assertIn("BOT_TOKEN=", text)
+        # второй вызов не перезаписывает существующий
+        self.assertEqual(resurrect.generate_env_example(str(self.root)), [])
+
+    def test_no_env_no_file(self):
+        from butler import resurrect
+        (self.root / "main.py").write_text("print('hi')\n", encoding="utf-8")
+        self.assertEqual(resurrect.find_env_names(str(self.root)), [])
+        self.assertEqual(resurrect.generate_env_example(str(self.root)), [])
+
+
+class RunDetectTest(unittest.TestCase):
+    """Детект команды запуска: npm start, py main.py, None."""
+
+    def setUp(self):
+        self.tmp = tempfile.TemporaryDirectory()
+        self.root = Path(self.tmp.name).resolve()
+
+    def tearDown(self):
+        self.tmp.cleanup()
+
+    def test_npm_start(self):
+        from butler import runner
+        (self.root / "package.json").write_text(
+            json.dumps({"scripts": {"start": "node server.js"}}), encoding="utf-8")
+        plan = runner.detect_command(str(self.root), ["node"])
+        self.assertEqual(plan, {"cmd": ["npm", "start"], "kind": "npm"})
+
+    def test_python_entry(self):
+        from butler import runner
+        (self.root / "bot.py").write_text("print('x')\n", encoding="utf-8")
+        plan = runner.detect_command(str(self.root), ["python"])
+        self.assertEqual(plan["kind"], "python")
+        self.assertTrue(plan["cmd"][0].endswith(("py", "python", "python.exe")))
+
+    def test_unknown_gives_none(self):
+        from butler import runner
+        self.assertIsNone(runner.detect_command(str(self.root), []))
 
 
 if __name__ == "__main__":

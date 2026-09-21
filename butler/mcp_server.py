@@ -16,8 +16,8 @@ from .dupes import find_dupes
 from .health import evaluate, primary_stack
 from .index import build_feed, format_report, node as galaxy_node, summarize
 from .scanner import scan
-from .store import (diff_scans, get_project, list_projects, norm_root,
-                    save_projects)
+from .store import (diff_scans, get_meta, get_project, list_projects, norm_root,
+                    save_projects, set_note, set_tags)
 
 SERVER_NAME = "project-butler"
 SERVER_VERSION = "0.2.0"
@@ -115,6 +115,15 @@ TOOLS = [
         "name": "butler_diff",
         "description": "Что изменилось между двумя последними сканами: новые/удалённые проекты, рост и падение score.",
         "inputSchema": {"type": "object", "properties": {"root": ROOT_SCHEMA}},
+    },
+    {
+        "name": "butler_tags",
+        "description": "Теги и заметка проекта. Без tags/note — показать; с tags (список строк) — записать теги; с note (строка) — записать заметку.",
+        "inputSchema": {"type": "object", "properties": {
+            "name": {"type": "string", "description": "Имя или путь проекта"},
+            "tags": {"type": "array", "items": {"type": "string"}},
+            "note": {"type": "string"},
+            "root": ROOT_SCHEMA}, "required": ["name"]},
     },
 ]
 
@@ -379,6 +388,26 @@ def tool_diff(args):
     return "\n".join(lines)
 
 
+def tool_tags(args):
+    """Теги и заметка проекта: без tags/note — показать, с ними — записать."""
+    root = norm_root(config.resolve_root(args.get("root")))
+    rec = get_project(args["name"], root)
+    if not rec:
+        return f"Проект '{args['name']}' не найден в {root}. Начни с butler_list_projects."
+    path = rec["path"]
+    if "tags" in args:
+        set_tags(path, args.get("tags") or [])
+    if "note" in args:
+        set_note(path, args.get("note") or "")
+    meta = get_meta(path)
+    if "tags" not in args and "note" not in args:
+        return json.dumps({"name": rec["name"], "path": path,
+                           "tags": meta["tags"], "note": meta["note"]},
+                          ensure_ascii=False, indent=1)
+    return (f"Сохранил. Теги {rec['name']}: {', '.join(meta['tags']) or '—'}.\n"
+            f"Заметка: {meta['note'] or '—'}")
+
+
 HANDLERS = {
     "butler_status": tool_status,
     "butler_list_projects": tool_list,
@@ -393,6 +422,7 @@ HANDLERS = {
     "butler_secrets": tool_secrets,
     "butler_doctor": tool_doctor,
     "butler_diff": tool_diff,
+    "butler_tags": tool_tags,
 }
 
 

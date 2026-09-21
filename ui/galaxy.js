@@ -20,7 +20,10 @@ const state = {
   feed: null, stars: [], hidden: new Set(), byName: {}, rank: new Map(),
   yaw: 0.6, pitch: -0.34, zoom: 1,
   hover: null, selected: null, width: 0, height: 0,
-  bg: null, scanning: false,
+  bg: null, scanning: false, bornAt: 0,
+  spin: null, lastAction: 0, cosmosStill: false,
+  query: '', prev: {}, fx: [], warpT0: 0,
+  meta: {}, contentHits: new Set(), tagFilter: new Set(), feedMtime: 0,
 };
 
 const canvas = document.getElementById('sky');
@@ -38,6 +41,12 @@ const ui = {
   rootList: document.getElementById('rootList'),
   rootApply: document.getElementById('rootApply'),
   browseBtn: document.getElementById('browseBtn'),
+  search: document.getElementById('searchInput'),
+  digest: document.getElementById('digest'),
+  digestMeta: document.getElementById('digestMeta'),
+  digestBody: document.getElementById('digestBody'),
+  digestClose: document.getElementById('digestClose'),
+  digestBtn: document.getElementById('digestBtn'),
 };
 
 /* ---------- пикер папок ---------- */
@@ -130,6 +139,116 @@ picker.scanBtn.addEventListener('click', () => { if (picker.current) scanFrom(pi
 picker.box.addEventListener('click', (ev) => { if (ev.target === picker.box) closePicker(); });
 ui.browseBtn.addEventListener('click', () => openPicker());
 
+/* ---------- поиск-затмение ---------- */
+
+let searchDebounce = null;
+
+ui.search.addEventListener('input', () => {
+  state.query = ui.search.value.trim().toLowerCase();
+  clearTimeout(searchDebounce);
+  searchDebounce = setTimeout(contentSearch, 350);   // содержимое ищем с задержкой
+  renderDock();
+});
+ui.search.addEventListener('keydown', (ev) => {
+  ev.stopPropagation();                            // R и прочие хоткеи не стреляют в поиске
+  if (ev.key === 'Escape') {
+    ui.search.value = '';
+    state.query = '';
+    state.contentHits = new Set();
+    renderDock();
+    ui.search.blur();
+  }
+});
+
+/* серверный поиск по зависимостям и README — то, чего не видно из фида */
+async function contentSearch() {
+  if (state.query.length < 3) { state.contentHits = new Set(); renderDock(); return; }
+  try {
+    const data = await api('/api/search?q=' + encodeURIComponent(state.query));
+    state.contentHits = new Set((data.results || []).map((r) => r.path));
+    const names = (data.results || []).map((r) => r.name);
+    if (names.length) {
+      say('по содержимому нашлось: ' + names.slice(0, 4).join(', ') +
+          (names.length > 4 ? ' и ещё ' + (names.length - 4) : ''));
+    }
+    renderDock();
+  } catch (err) { /* содержимое — бонус, молча живём без него */ }
+}
+
+/* ---------- дайджест изменений ---------- */
+
+function digestOpen() { return ui.digest.classList.contains('open'); }
+
+function openDigest() {
+  ui.digest.classList.add('open');
+  ui.digestBody.innerHTML = '<div class="pempty">читаю диф…</div>';
+  api('/api/digest').then(renderDigest).catch((err) => {
+    ui.digestBody.innerHTML = '<div class="pempty">' + esc(err.message) + '</div>';
+  });
+}
+
+function closeDigest() { ui.digest.classList.remove('open'); }
+
+function digestChips(names, cls) {
+  if (!names || !names.length) return '';
+  return '<div class="tagrow">' + names.map((n) =>
+    '<span class="tagchip" style="border-color:' + cls + '55;background:' + cls + '14">' +
+    esc(n) + '</span>').join('') + '</div>';
+}
+
+function renderDigest(data) {
+  const d = data.diff || {};
+  const human = humanBytes(data.junk_bytes || 0);
+  ui.digestMeta.textContent = data.root + ' · ' + data.projects + ' проектов · ' +
+    human + ' мусора · ' + data.secrets + ' секретов · ' + data.todos + ' TODO';
+  const rows = [];
+  if (d.scans < 2) {
+    rows.push('<div class="pempty">нужен второй скан — сравнивать пока не с чем</div>');
+  } else {
+    if (d.added && d.added.length) {
+      rows.push('<div class="kick" style="margin-top:6px">родились (' + d.added.length + ')</div>');
+      rows.push(digestChips(d.added, '#7ef0b2'));
+    }
+    if (d.removed && d.removed.length) {
+      rows.push('<div class="kick" style="margin-top:10px">ушли (' + d.removed.length + ')</div>');
+      rows.push(digestChips(d.removed, '#ff7a90'));
+    }
+    (d.improved || []).forEach((it) => {
+      rows.push('<div class="fact"><span>▲ ' + esc(it.name) + '</span><span style="color:var(--good)">' +
+        it.from + ' → ' + it.to + ' (+' + it.delta + ')</span></div>');
+    });
+    (d.worsened || []).forEach((it) => {
+      rows.push('<div class="fact"><span>▼ ' + esc(it.name) + '</span><span style="color:var(--bad)">' +
+        it.from + ' → ' + it.to + ' (' + it.delta + ')</span></div>');
+    });
+    // пустые массивы в JS truthy — проверяем длины явно, иначе «тишь да гладь» никогда не покажется
+    if (!((d.added && d.added.length) || (d.removed && d.removed.length) ||
+          (d.improved && d.improved.length) || (d.worsened && d.worsened.length))) {
+      rows.push('<div class="pempty">тишь да гладь — ничего не изменилось</div>');
+    }
+  }
+  ui.digestBody.innerHTML = rows.join('');
+}
+
+ui.digestClose.addEventListener('click', closeDigest);
+ui.digest.addEventListener('click', (ev) => { if (ev.target === ui.digest) closeDigest(); });
+ui.digestBtn.addEventListener('click', openDigest);
+
+/* ---------- живой фид: фид сменился на диске — галактика обновляется сама ---------- */
+
+setInterval(async () => {
+  if (state.scanning || state.feed === null) return;
+  try {
+    const ver = await api('/api/feed-version');
+    if (!state.feedMtime) { state.feedMtime = ver.mtime; return; }
+    if (ver.mtime && ver.mtime !== state.feedMtime) {
+      state.feedMtime = ver.mtime;
+      await loadFeed();
+      say('фид обновился (' + new Date(ver.mtime * 1000).toLocaleTimeString() + ')');
+    }
+  } catch (e) { /* сервер спит — попробуем в следующий тик */ }
+}, 6000);
+
 function say(text) { ui.status.textContent = text; }
 
 function fail(text) {
@@ -176,10 +295,28 @@ async function init(rescan) {
 }
 
 function refreshUI() {
+  state.bornAt = performance.now();                  // звёзды разгораются каскадом
   buildStars();
+  spawnCosmicEvents();
   renderTop();
   renderLegend();
   renderDock(true);                              // карточки-папки влетают каскадом
+}
+
+/* события из диффа сканов: сверхновые (резко поправились) и рождения (новые проекты) */
+function spawnCosmicEvents() {
+  state.fx = [];
+  if (!Object.keys(state.prev).length) return;       // первый скан — без драмы
+  state.stars.forEach((star) => {
+    const prev = state.prev[star.node.path];
+    if (prev === undefined) {
+      if (star.node.score > 0) {
+        state.fx.push({ star, kind: 'birth', born: performance.now() + star.index * 50 });
+      }
+    } else if (star.node.score - prev >= 12) {
+      state.fx.push({ star, kind: 'nova', born: performance.now() + 400 });
+    }
+  });
 }
 
 async function loadFeed() {
@@ -208,10 +345,12 @@ function pollScan(onDone) {
 function waitScan(root) {
   state.scanning = true;
   ui.rootApply.disabled = true;
+  document.body.classList.add('scanning');           // пульс: статус и вордмарк дышат
   say('сканирую ' + root + ' — большим папкам нужно время, галактика обновится сама');
   pollScan((st) => {
     state.scanning = false;
     ui.rootApply.disabled = false;
+    document.body.classList.remove('scanning');
     if (st.error) { fail(st.error); return; }
     loadFeed().then(() => {
       say('готово: ' + state.feed.projects.length + ' проектов, фид от ' + state.feed.generated_at_iso);
@@ -255,7 +394,7 @@ async function applyRoot() {
   }
   select(null);
   state.hidden.clear();
-  if (res.scanning) { waitScan(res.root); return; }
+  if (res.scanning) { state.warpT0 = performance.now(); waitScan(res.root); return; }
   ui.rootApply.disabled = false;
   try {
     await loadFeed();
@@ -288,6 +427,17 @@ function buildStars() {
   state.stars.forEach((s) => { state.byName[s.node.name] = s; });
   const ranked = [...state.stars].sort((a, b) => b.node.score - a.node.score);
   state.rank = new Map(ranked.map((s, i) => [s.index, i]));
+  state.prev = state.feed.prev || {};
+  state.meta = state.feed.meta || {};
+}
+
+/* совпадение с поиском: имя, стек или попадание по содержимому */
+function matchQ(star) {
+  const q = state.query;
+  if (!q) return true;
+  return state.contentHits.has(star.node.path) ||
+         star.node.name.toLowerCase().includes(q) ||
+         (star.node.stacks || []).join(' ').toLowerCase().includes(q);
 }
 
 function humanBytes(num) {
@@ -340,8 +490,16 @@ function renderLegend() {
     if (!count) return;
     const row = document.createElement('span');
     row.className = 'item';
+    row.title = 'двойной клик — курс на кластер';
     row.innerHTML = '<i style="background:' + (STACK_COLORS[stack] || '#888') + '"></i>' +
       esc(stack) + ' ' + count;
+    row.ondblclick = () => {
+      const pos = state.feed.clusters[stack];
+      if (pos) {
+        flyTo({ x: pos[0] * SPREAD, y: pos[1] * SPREAD, z: pos[2] * SPREAD });
+        say('курс на кластер ' + stack);
+      }
+    };
     stacks.append(row);
   });
   ui.legend.append(stacks);
@@ -352,6 +510,27 @@ function renderLegend() {
 
   const pills = document.createElement('div');
   pills.className = 'grp';
+
+  // теги пользователя: клик — фильтр галактики по тегу
+  const tagUniverse = new Set();
+  Object.values(state.meta).forEach((m) => (m.tags || []).forEach((t) => tagUniverse.add(t)));
+  if (tagUniverse.size) {
+    [...tagUniverse].sort().forEach((tag) => {
+      const pill = document.createElement('button');
+      pill.className = 'pill';
+      const on = [...state.tagFilter].some((t) => t.toLowerCase() === tag.toLowerCase());
+      pill.setAttribute('aria-pressed', String(on));
+      pill.innerHTML = '<i style="background:var(--accent)"></i>' + esc(tag);
+      pill.onclick = () => {
+        const hit = [...state.tagFilter].find((t) => t.toLowerCase() === tag.toLowerCase());
+        if (hit) state.tagFilter.delete(hit); else state.tagFilter.add(tag);
+        renderLegend();
+        renderDock();
+      };
+      pills.append(pill);
+    });
+  }
+
   ['alive', 'abandoned', 'broken', 'unknown'].forEach((status) => {
     const count = totals.by_status[status] || 0;
     if (!count) return;
@@ -409,7 +588,8 @@ function renderDock(stagger) {
   visibleStars.forEach((star, i) => {
     const n = star.node;
     const item = document.createElement('div');
-    item.className = 'item' + (star === state.selected ? ' active' : '');
+    item.className = 'item' + (star === state.selected ? ' active' : '') +
+      (!matchQ(star) ? ' dim' : '');
     item.title = n.path;
     if (stagger) {
       item.classList.add('enter');
@@ -502,7 +682,14 @@ function project(x, y, z) {
   return { x: state.width / 2 + x1 * s, y: state.height / 2 + y1 * s, z: z2, s };
 }
 
-function visible(star) { return !state.hidden.has(star.node.status); }
+function visible(star) {
+  if (state.hidden.has(star.node.status)) return false;
+  if (state.tagFilter.size) {
+    const tags = (state.meta[star.node.path] || {}).tags || [];
+    if (!tags.some((t) => state.tagFilter.has(t.toLowerCase()))) return false;
+  }
+  return true;
+}
 
 function hexA(hex, alpha) {
   const n = parseInt(hex.slice(1), 16);
@@ -545,35 +732,90 @@ function drawDupes() {
   ctx.restore();
 }
 
+function drawBlackHole(star, pr, r, now) {
+  const R = Math.max(6, r * 2.4);
+  // гравитационный профиль: чернильное ядро, вокруг — искривлённый свет
+  const g = ctx.createRadialGradient(pr.x, pr.y, 0, pr.x, pr.y, R * 2.2);
+  g.addColorStop(0, 'rgba(0,0,0,1)');
+  g.addColorStop(0.42, 'rgba(2,2,6,.96)');
+  g.addColorStop(0.55, 'rgba(30,22,60,.55)');
+  g.addColorStop(1, 'rgba(0,0,0,0)');
+  ctx.fillStyle = g;
+  ctx.beginPath();
+  ctx.arc(pr.x, pr.y, R * 2.2, 0, Math.PI * 2);
+  ctx.fill();
+  // фотонное кольцо
+  ctx.strokeStyle = 'rgba(255,214,150,.7)';
+  ctx.lineWidth = 1.4;
+  ctx.beginPath();
+  ctx.arc(pr.x, pr.y, R * 0.62, 0, Math.PI * 2);
+  ctx.stroke();
+  // аккреционные дуги — встречное вращение, наклонный эллипс
+  for (let i = 0; i < 3; i++) {
+    const a0 = (now / (650 + i * 240)) * (i % 2 ? -1 : 1) + i * 2.1;
+    ctx.strokeStyle = hexA(i === 1 ? '#ffd479' : '#9d8cff', 0.55 - i * 0.12);
+    ctx.lineWidth = 1.5 - i * 0.3;
+    ctx.beginPath();
+    ctx.ellipse(pr.x, pr.y, R * (0.95 + i * 0.28), R * (0.5 + i * 0.14), 0.35, a0, a0 + Math.PI * 0.9);
+    ctx.stroke();
+  }
+}
+
 function drawStars(order) {
   const now = performance.now();
   order.forEach((item) => {
     const star = item.star, pr = item.pr;
-    const r = Math.max(1.4, star.size * pr.s * 1.3);
+    // дыхание размера в противофазе к мерцанию — звезда не точка, а живой сгусток
+    const breathe = state.cosmosStill ? 1 : 1 + 0.05 * Math.sin(now / 1500 + star.index * 1.93);
+    const r = Math.max(1.4, star.size * pr.s * 1.3 * breathe);
     const alive = star.node.status === 'alive';
     star.screen = { x: pr.x, y: pr.y, r: r + 6, s: pr.s };
 
-    // мерцание всей галактики: у каждой звезды своя фаза — небо живое
-    const tw = 0.82 + 0.18 * Math.sin(now / 620 + star.index * 2.7);
-    const isHover = star === state.hover && star !== state.selected;
-    const glowA = (alive ? 0.5 : 0.3) * tw * (isHover ? 1.7 : 1);
-    const glowR = r * 6.5 * (isHover ? 1.3 : 1);
-    const glow = ctx.createRadialGradient(pr.x, pr.y, 0, pr.x, pr.y, glowR);
-    glow.addColorStop(0, hexA(star.color, glowA));
-    glow.addColorStop(0.35, hexA(star.color, glowA * 0.35));
-    glow.addColorStop(1, hexA(star.color, 0));
-    ctx.fillStyle = glow;
-    ctx.beginPath();
-    ctx.arc(pr.x, pr.y, glowR, 0, Math.PI * 2);
-    ctx.fill();
+    // разгорание после загрузки фида: каждая звезда зажигается со своей задержкой
+    const raw = Math.max(0, Math.min(1, (now - state.bornAt - star.index * 14) / 300));
+    const appear = raw * (2 - raw);
+    if (appear <= 0) return;
+    const on = matchQ(star);                       // поиск-затмение: чужие уходят в тень
+    ctx.globalAlpha = appear * (state.query && !on ? 0.07 : 1);
 
-    const core = ctx.createRadialGradient(pr.x, pr.y, 0, pr.x, pr.y, r);
-    core.addColorStop(0, '#ffffff');
-    core.addColorStop(1, star.color);
-    ctx.fillStyle = core;
-    ctx.beginPath();
-    ctx.arc(pr.x, pr.y, r, 0, Math.PI * 2);
-    ctx.fill();
+    // мерцание всей галактики: у каждой звезды своя фаза — небо живое
+    const tw = state.cosmosStill ? 1 : 0.82 + 0.18 * Math.sin(now / 620 + star.index * 2.7);
+    const isHover = star === state.hover && star !== state.selected;
+    const hole = star.node.score < 30;             // мёртвое — в чёрную дыру
+
+    if (hole) {
+      drawBlackHole(star, pr, r, now);
+    } else {
+      const glowA = (alive ? 0.5 : 0.3) * tw * (isHover ? 1.7 : 1);
+      const glowR = r * 6.5 * (isHover ? 1.3 : 1);
+      const glow = ctx.createRadialGradient(pr.x, pr.y, 0, pr.x, pr.y, glowR);
+      glow.addColorStop(0, hexA(star.color, glowA));
+      glow.addColorStop(0.35, hexA(star.color, glowA * 0.35));
+      glow.addColorStop(1, hexA(star.color, 0));
+      ctx.fillStyle = glow;
+      ctx.beginPath();
+      ctx.arc(pr.x, pr.y, glowR, 0, Math.PI * 2);
+      ctx.fill();
+
+      const core = ctx.createRadialGradient(pr.x, pr.y, 0, pr.x, pr.y, r);
+      core.addColorStop(0, '#ffffff');
+      core.addColorStop(1, star.color);
+      ctx.fillStyle = core;
+      ctx.beginPath();
+      ctx.arc(pr.x, pr.y, r, 0, Math.PI * 2);
+      ctx.fill();
+
+      // дифракционные лучи у трёх самых ярких — как на снимках телескопа
+      if (!state.cosmosStill && state.rank.get(star.index) < 3) {
+        const L = r * 4.6;
+        ctx.strokeStyle = hexA(star.color, 0.30 * tw);
+        ctx.lineWidth = 1;
+        ctx.beginPath();
+        ctx.moveTo(pr.x - L, pr.y); ctx.lineTo(pr.x + L, pr.y);
+        ctx.moveTo(pr.x, pr.y - L); ctx.lineTo(pr.x, pr.y + L);
+        ctx.stroke();
+      }
+    }
 
     if (isHover) {
       ctx.strokeStyle = 'rgba(242, 244, 255, .45)';
@@ -583,12 +825,19 @@ function drawStars(order) {
       ctx.stroke();
     }
 
-    if (star.node.status === 'broken' || star.node.status === 'abandoned') {
-      ctx.strokeStyle = hexA(star.status, 0.55);
+    if (!hole && (star.node.status === 'broken' || star.node.status === 'abandoned')) {
+      let ringR = r + 4.5, ringA = 0.55;
+      if (star.node.status === 'broken' && !state.cosmosStill) {
+        // пульсар: сломанный проект мигает, как маяк бедствия
+        const pulse = Math.pow(Math.max(0, Math.sin(now / 900 + star.index * 1.3)), 8);
+        ringR += pulse * 7;
+        ringA += pulse * 0.35;
+      }
+      ctx.strokeStyle = hexA(star.status, ringA);
       ctx.lineWidth = 1.1;
       if (star.node.status === 'broken') ctx.setLineDash([3, 3]);
       ctx.beginPath();
-      ctx.arc(pr.x, pr.y, r + 4.5, 0, Math.PI * 2);
+      ctx.arc(pr.x, pr.y, ringR, 0, Math.PI * 2);
       ctx.stroke();
       ctx.setLineDash([]);
     }
@@ -624,6 +873,19 @@ function drawStars(order) {
       ctx.stroke();
       ctx.restore();
     }
+    // TODO-рой: каждый маркер — янтарная частица на орбите своей звезды
+    const todoDots = Math.min(star.node.todos || 0, 10);
+    if (todoDots > 0 && pr.s > 0.45 && !state.cosmosStill) {
+      ctx.fillStyle = 'rgba(255,212,121,' + (0.5 * appear).toFixed(3) + ')';
+      const orbitBase = 1300 + (star.index % 5) * 170;
+      for (let i = 0; i < todoDots; i++) {
+        const a = now / orbitBase + i * (Math.PI * 2 / todoDots);
+        const orbR = r + 9 + (i % 3) * 3.5;
+        ctx.beginPath();
+        ctx.arc(pr.x + Math.cos(a) * orbR, pr.y + Math.sin(a) * orbR * 0.45, 1.1, 0, Math.PI * 2);
+        ctx.fill();
+      }
+    }
     if (labelWorthy(star) && pr.s > 0.35) {
       const sel = star === state.selected || star === state.hover;
       ctx.font = (sel ? '450 ' : '300 ') + '11px "Segoe UI", sans-serif';
@@ -631,16 +893,19 @@ function drawStars(order) {
       ctx.textAlign = 'center';
       ctx.fillText(star.node.name + ' · ' + star.node.score, pr.x, pr.y - r - 9);
     }
+    ctx.globalAlpha = 1;
   });
 }
 
 function labelWorthy(star) {
+  if (state.query) return matchQ(star);            // в поиске подписаны только совпадения
   return star === state.hover || star === state.selected || state.rank.get(star.index) < TOP_LABELS;
 }
 
 let projected = [];
 function draw() {
   if (!state.feed) return;
+  state.cosmosStill = motionOff();
   stepFly();                                                  // плавный полёт камеры к цели
   ctx.clearRect(0, 0, state.width, state.height);
   if (state.bg) ctx.drawImage(state.bg, 0, 0, state.width, state.height);
@@ -652,6 +917,74 @@ function draw() {
   drawLinks(projected);
   drawDupes();
   drawStars(projected);
+  drawFx(performance.now());
+  drawWarp(performance.now());
+}
+
+/* сверхновые и рождения из диффа сканов */
+function drawFx(now) {
+  for (let i = state.fx.length - 1; i >= 0; i--) {
+    const fx = state.fx[i];
+    const life = fx.kind === 'nova' ? 2000 : 1100;
+    const t = (now - fx.born) / life;
+    if (t >= 1) { state.fx.splice(i, 1); continue; }
+    if (t < 0) continue;                           // ещё не родилось — ждёт своей задержки
+    const pr = project(fx.star.x, fx.star.y, fx.star.z);
+    const r = Math.max(4, fx.star.size * pr.s * 2);
+    const k = 1 - t;
+    if (fx.kind === 'nova') {
+      if (t < 0.25) {                              // короткая белая вспышка в начале
+        const g = ctx.createRadialGradient(pr.x, pr.y, 0, pr.x, pr.y, r * 10);
+        g.addColorStop(0, 'rgba(255,255,255,' + (0.85 * (1 - t / 0.25)).toFixed(3) + ')');
+        g.addColorStop(1, 'rgba(255,255,255,0)');
+        ctx.fillStyle = g;
+        ctx.beginPath();
+        ctx.arc(pr.x, pr.y, r * 10, 0, Math.PI * 2);
+        ctx.fill();
+      }
+      ctx.strokeStyle = 'rgba(222,232,255,' + (0.75 * k).toFixed(3) + ')';
+      ctx.lineWidth = 1.6;
+      ctx.beginPath();
+      ctx.arc(pr.x, pr.y, r * (1.5 + t * 9), 0, Math.PI * 2);
+      ctx.stroke();
+      ctx.strokeStyle = hexA(fx.star.color, 0.5 * k);
+      ctx.lineWidth = 1;
+      ctx.beginPath();
+      ctx.arc(pr.x, pr.y, r * (1 + t * 6), 0, Math.PI * 2);
+      ctx.stroke();
+    } else {                                       // рождение: зелёный приветственный круг
+      ctx.strokeStyle = hexA('#7ef0b2', 0.7 * k);
+      ctx.lineWidth = 1.2;
+      ctx.beginPath();
+      ctx.arc(pr.x, pr.y, r * (1 + t * 4), 0, Math.PI * 2);
+      ctx.stroke();
+    }
+  }
+}
+
+/* гиперпространство при смене корня: разгон → вспышка → новая галактика разгорается */
+function drawWarp(now) {
+  if (!state.warpT0) return;
+  const t = (now - state.warpT0) / 950;
+  if (t >= 1) { state.warpT0 = 0; return; }
+  const k = t < 0.55 ? t / 0.55 : (1 - t) / 0.45;
+  const cx = state.width / 2, cy = state.height / 2;
+  const maxR = Math.hypot(cx, cy);
+  for (let i = 0; i < 90; i++) {
+    const a = i * 2.399 + Math.floor(i / 7) * 0.11;
+    const r0 = ((i * 53) % 100) / 100 * maxR * 0.9 + 30;
+    const len = 50 + 260 * t * (0.4 + (i % 5) * 0.15);
+    const x1 = cx + Math.cos(a) * r0, y1 = cy + Math.sin(a) * r0;
+    const x2 = cx + Math.cos(a) * (r0 + len), y2 = cy + Math.sin(a) * (r0 + len);
+    ctx.strokeStyle = 'rgba(205,220,255,' + (0.5 * k).toFixed(3) + ')';
+    ctx.lineWidth = 1.1 + (i % 3) * 0.4;
+    ctx.beginPath();
+    ctx.moveTo(x1, y1);
+    ctx.lineTo(x2, y2);
+    ctx.stroke();
+  }
+  ctx.fillStyle = 'rgba(238,242,255,' + (0.5 * Math.pow(k, 3)).toFixed(3) + ')';
+  ctx.fillRect(0, 0, state.width, state.height);
 }
 
 /* ---------- полёт камеры к выбранной папке ---------- */
@@ -686,10 +1019,29 @@ function stepFly() {
   if (settled) state.fly = null;
 }
 
+/* ---------- инерция и ленивый дрейф камеры ---------- */
+
+function stepCameraIdle() {
+  if (drag) return;
+  if (state.spin) {
+    // юзер «бросил» галактику — катимся по инерции и плавно гасим
+    state.yaw += state.spin.yaw;
+    state.pitch = Math.max(-1.25, Math.min(1.25, state.pitch + state.spin.pitch));
+    state.spin.yaw *= 0.93;
+    state.spin.pitch *= 0.93;
+    if (Math.abs(state.spin.yaw) < 1e-5 && Math.abs(state.spin.pitch) < 1e-5) state.spin = null;
+    return;
+  }
+  if (!state.cosmosStill && !state.fly && !state.selected &&
+      performance.now() - state.lastAction > 12000) {
+    state.yaw += 0.00038;                        // вселенная вращается и без нас
+  }
+}
+
 function pick(mx, my) {
   let best = null, bestDist = Infinity;
   for (const star of state.stars) {
-    if (!visible(star)) continue;
+    if (!visible(star) || !matchQ(star)) continue;  // в поиске кликаем только по совпадениям
     const sc = star.screen;
     const dist = Math.hypot(sc.x - mx, sc.y - my);
     const limit = Math.max(HIT_RADIUS, sc.r);
@@ -807,6 +1159,7 @@ async function cleanJunk(star, part, btn) {
 
 function renderPanel(star) {
   const n = star.node;
+  const meta = state.meta[n.path] || { tags: [], note: '' };
   const penalties = (n.penalties || []).map((p) => '<li>' + esc(p.why) + ' (' + p.points + ')</li>').join('');
   const bonuses = (n.bonuses || []).map((b) => '<li>+' + b.points + ' ' + esc(b.why) + '</li>').join('');
 
@@ -844,6 +1197,9 @@ function renderPanel(star) {
     fact('вес на диске', humanBytes(n.total_bytes)) +
     fact('README', n.has_readme ? 'есть' : 'нет') +
     '</div>' +
+    '<div class="tagrow" id="tagRow"></div>' +
+    '<textarea class="notebox" id="noteBox" maxlength="2000" ' +
+    'placeholder="заметка: что это, почему забросил, что доделать…">' + esc(meta.note) + '</textarea>' +
     warnHtml +
     (penalties ? '<ul class="why">' + penalties + '</ul>' : '') +
     (bonuses ? '<ul class="why bonus">' + bonuses + '</ul>' : '') +
@@ -853,11 +1209,13 @@ function renderPanel(star) {
     '<div class="abtn main" data-open="code">VS Code</div>' +
     '<div class="abtn" data-open="explorer">Папка</div>' +
     '<div class="abtn" data-open="terminal">Терминал</div>' +
+    '<div class="abtn" id="runBtn">Запустить</div>' +
+    '<div class="abtn" id="resurrectBtn" title="окружение + зависимости + .env.example">Воскресить</div>' +
     '<div class="abtn" id="doctorBtn">Диагностика</div>' +
     (n.has_git ? '' : '<div class="abtn" id="gitBtn">Создать git</div>') +
     '<div class="abtn" data-copy="path">Копировать путь</div>' +
     '</div>' +
-    '<div id="doctorOut"></div>';
+    '<div id="runBox"></div><div id="resBox"></div><div id="doctorOut"></div>';
 
   ui.detail.querySelector('.close').onclick = () => select(null);
   ui.detail.querySelectorAll('[data-open]').forEach((btn) => {
@@ -874,7 +1232,193 @@ function renderPanel(star) {
   const gitBtn = ui.detail.querySelector('#gitBtn');
   if (gitBtn) gitBtn.onclick = () => gitInit(star, gitBtn);
 
+  renderTags(star, meta);
+  wireNote(star);
+  wireRun(star);
+  wireResurrect(star);
+
   loadHistory(star);
+}
+
+/* ---------- теги и заметка ---------- */
+
+function renderTags(star, meta) {
+  const row = ui.detail.querySelector('#tagRow');
+  if (!row) return;
+  row.innerHTML = '';
+  meta.tags.forEach((tag) => {
+    const chip = document.createElement('span');
+    chip.className = 'tagchip';
+    chip.textContent = tag + ' ';
+    const x = document.createElement('i');
+    x.textContent = '×';
+    x.title = 'убрать тег';
+    x.onclick = () => saveTags(star, meta.tags.filter((t) => t !== tag));
+    chip.append(x);
+    row.append(chip);
+  });
+  const input = document.createElement('input');
+  input.className = 'taginput';
+  input.placeholder = '+ тег';
+  input.maxLength = 24;
+  input.onkeydown = (ev) => {
+    if (ev.key === 'Enter' && input.value.trim()) {
+      saveTags(star, meta.tags.concat([input.value.trim()]));
+      ev.stopPropagation();
+    }
+  };
+  row.append(input);
+}
+
+async function saveTags(star, tags) {
+  try {
+    const res = await api('/api/tags', { path: star.node.path, tags });
+    state.meta[star.node.path] = { ...(state.meta[star.node.path] || {}), tags: res.tags };
+    renderTags(star, state.meta[star.node.path]);
+    renderLegend();                                  // фильтры по тегам обновились
+    renderDock();
+    say('теги: ' + (res.tags.join(', ') || '—'));
+  } catch (err) {
+    fail('теги не сохранились: ' + err.message);
+  }
+}
+
+function wireNote(star) {
+  const box = ui.detail.querySelector('#noteBox');
+  if (!box) return;
+  box.addEventListener('keydown', (ev) => ev.stopPropagation());
+  box.addEventListener('change', async () => {
+    try {
+      await api('/api/note', { path: star.node.path, note: box.value });
+      state.meta[star.node.path] = { ...(state.meta[star.node.path] || {}), note: box.value };
+      say('заметка сохранена');
+    } catch (err) {
+      fail('заметка не сохранилась: ' + err.message);
+    }
+  });
+}
+
+/* ---------- Run в один клик ---------- */
+
+let runPoll = null;
+
+function wireRun(star) {
+  const btn = ui.detail.querySelector('#runBtn');
+  if (!btn) return;
+  api('/api/run-status?path=' + encodeURIComponent(star.node.path)).then((st) => {
+    if (!ui.detail.querySelector('#runBtn')) return;   // карточку уже перерисовали
+    if (st.running) {
+      btn.textContent = 'Остановить';
+      btn.classList.add('going');
+      btn.onclick = async () => {
+        await api('/api/run-stop', { path: star.node.path });
+        wireRun(star);
+      };
+      renderRunLog(st.node.path, st);
+      startRunPoll(star.node.path);
+    } else {
+      btn.textContent = 'Запустить';
+      btn.classList.remove('going');
+      btn.onclick = async () => {
+        btn.classList.add('disabled');
+        try {
+          const res = await api('/api/run', { path: star.node.path, confirm: true });
+          say('запущено: ' + (res.cmd || []).join(' ') + ' (pid ' + res.pid + ')');
+          wireRun(star);
+        } catch (err) {
+          fail('Не запустилось: ' + err.message);
+        } finally {
+          btn.classList.remove('disabled');
+        }
+      };
+      if (st.log && st.log.length) renderRunLog(st.node.path, st);
+      stopRunPoll();
+    }
+  }).catch(() => {});
+}
+
+function renderRunLog(path, st) {
+  const box = ui.detail.querySelector('#runBox');
+  if (!box) return;
+  const head = '<div class="kick" style="margin-top:14px">' +
+    (st.running ? 'лог запуска · ' + (st.cmd || []).join(' ') : 'процесс завершён (код ' +
+      (st.exit === null ? '?' : st.exit) + ')') + '</div>';
+  const lines = (st.log || []).map((l) => esc(l)).join('\n');
+  box.innerHTML = head + '<div class="runlog">' + (lines || 'пока тихо…') + '</div>';
+  box.querySelector('.runlog').scrollTop = 1e9;
+}
+
+function startRunPoll(path) {
+  stopRunPoll();
+  runPoll = setInterval(async () => {
+    if (!ui.detail.classList.contains('open')) { stopRunPoll(); return; }
+    try {
+      const st = await api('/api/run-status?path=' + encodeURIComponent(path));
+      renderRunLog(path, st);
+      if (!st.running) { stopRunPoll(); wireRun(state.selected || { node: { path } }); }
+    } catch (e) { /* жить дальше */ }
+  }, 1500);
+}
+
+function stopRunPoll() {
+  if (runPoll) { clearInterval(runPoll); runPoll = null; }
+}
+
+/* ---------- Resurrect ---------- */
+
+function wireResurrect(star) {
+  const btn = ui.detail.querySelector('#resurrectBtn');
+  if (!btn) return;
+  btn.onclick = async () => {
+    if (!window.confirm('Воскресить «' + star.node.name + '»? Это создаст .venv/npm install ' +
+        'и сгенерирует .env.example (если его нет). Код не трогается.')) return;
+    btn.classList.add('disabled');
+    try {
+      await api('/api/resurrect', { path: star.node.path, confirm: true });
+      pollResurrect(star);
+    } catch (err) {
+      fail('Не воскресилось: ' + err.message);
+      btn.classList.remove('disabled');
+    }
+  };
+  // если воскрешение уже идёт — подхватываем лог
+  api('/api/resurrect-status?path=' + encodeURIComponent(star.node.path)).then((st) => {
+    if (st.running) {
+      btn.classList.add('disabled');
+      renderResLog(st);
+      pollResurrect(star);
+    }
+  }).catch(() => {});
+}
+
+function renderResLog(st) {
+  const box = ui.detail.querySelector('#resBox');
+  if (!box) return;
+  const lines = (st.log || []).map((l) => esc(l)).join('\n');
+  box.innerHTML = '<div class="kick" style="margin-top:14px">воскрешение · ' +
+    esc(st.stage || '') + (st.running ? '…' : '') + '</div>' +
+    '<div class="runlog">' + (lines || '…') + '</div>';
+  box.querySelector('.runlog').scrollTop = 1e9;
+}
+
+function pollResurrect(star) {
+  const timer = setInterval(async () => {
+    if (!ui.detail.classList.contains('open')) { clearInterval(timer); return; }
+    try {
+      const st = await api('/api/resurrect-status?path=' + encodeURIComponent(star.node.path));
+      renderResLog(st);
+      if (!st.running) {
+        clearInterval(timer);
+        const btn = ui.detail.querySelector('#resurrectBtn');
+        if (btn) btn.classList.remove('disabled');
+        if (st.error) { fail(st.error); return; }
+        say('воскрешение готово — перезапускаю скан');
+        await init(true);
+        const again = state.byName[star.node.name];
+        if (again) select(again);
+      }
+    } catch (e) { /* ждём дальше */ }
+  }, 1500);
 }
 
 function pluralDays(days) {
@@ -903,6 +1447,8 @@ async function openTarget(path, how, btn) {
 let drag = null;
 
 canvas.addEventListener('pointerdown', (ev) => {
+  state.lastAction = performance.now();
+  state.spin = null;                             // новый бросок начинается с чистого листа
   drag = { x: ev.clientX, y: ev.clientY, moved: false };
   state.fly = null;                              // юзер рулит камерой сам — полёт отменяем
   canvas.classList.add('dragging');
@@ -910,12 +1456,14 @@ canvas.addEventListener('pointerdown', (ev) => {
 });
 
 canvas.addEventListener('pointermove', (ev) => {
+  state.lastAction = performance.now();
   if (drag) {
     const dx = ev.clientX - drag.x;
     const dy = ev.clientY - drag.y;
     if (Math.abs(dx) + Math.abs(dy) > 3) drag.moved = true;
     state.yaw += dx * 0.006;
     state.pitch = Math.max(-1.25, Math.min(1.25, state.pitch + dy * 0.006));
+    state.spin = { yaw: dx * 0.006, pitch: dy * 0.006 };     // последний вектор — в инерцию
     drag.x = ev.clientX;
     drag.y = ev.clientY;
     showTip(null);
@@ -943,13 +1491,21 @@ canvas.addEventListener('dblclick', (ev) => {
 
 canvas.addEventListener('wheel', (ev) => {
   ev.preventDefault();
+  state.lastAction = performance.now();
   state.zoom = Math.max(0.35, Math.min(3.5, state.zoom * Math.exp(-ev.deltaY * 0.0012)));
 }, { passive: false });
 
 window.addEventListener('keydown', (ev) => {
-  if (ev.target === ui.rootInput) return;
+  if (ev.target === ui.rootInput || ev.target === ui.search) return;
+  state.lastAction = performance.now();
+  if (ev.key === '/') {                            // мгновенный фокус на поиск
+    ev.preventDefault();
+    ui.search.focus();
+    return;
+  }
   if (ev.key === 'Escape') {
     if (pickerOpen()) { closePicker(); return; }
+    if (digestOpen()) { closeDigest(); return; }
     state.fly = { yaw: 0.6, pitch: -0.34, zoom: 1 };   // домой — плавно, а не телепортом
     select(null);
     return;
@@ -1009,6 +1565,7 @@ applyCosmosMotion();
 
 function loop() {
   cosmosStep();
+  stepCameraIdle();
   draw();
   requestAnimationFrame(loop);
 }

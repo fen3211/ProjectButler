@@ -37,6 +37,11 @@ CREATE TABLE IF NOT EXISTS scan_index (
     scan_ts REAL,
     names TEXT
 );
+CREATE TABLE IF NOT EXISTS meta (
+    path TEXT PRIMARY KEY,
+    tags TEXT,
+    note TEXT
+);
 """
 
 # Колонки, которые досыпаются в старую базу через ALTER TABLE (миграция без потери данных)
@@ -131,6 +136,23 @@ def history_for(path, limit=12) -> list:
         conn.close()
     return [{"ts": r[0], "score": r[1], "status": r[2], "todos": r[3], "junk": r[4]}
             for r in rows]
+
+
+def prev_scores(root) -> dict:
+    """Предыдущий score каждого проекта (со второго-сверху скана). Пусто, если скан один."""
+    conn = _connect()
+    try:
+        scans = conn.execute(
+            "SELECT scan_ts FROM scan_index WHERE root = ?"
+            " ORDER BY scan_ts DESC LIMIT 2", (root,)).fetchall()
+        if len(scans) < 2:
+            return {}
+        rows = conn.execute(
+            "SELECT path, score FROM history WHERE root = ? AND scan_ts = ?",
+            (root, scans[1][0])).fetchall()
+    finally:
+        conn.close()
+    return {path: score for path, score in rows}
 
 
 def diff_scans(root) -> dict:
@@ -250,3 +272,81 @@ def get_project(name_or_path, root=None):
         if needle in rec["name"].lower() or needle in rec["path"].lower().replace("\\", "/"):
             return rec
     return None
+
+
+def _clean_tags(tags) -> list:
+    """Пользовательский ввод приводим к списку коротких уникальных строк."""
+    if not isinstance(tags, list):
+        return []
+    out = []
+    for raw in tags:
+        tag = str(raw).strip()[:24]
+        if tag and tag.lower() not in [t.lower() for t in out]:
+            out.append(tag)
+        if len(out) >= 12:
+            break
+    return out
+
+
+def get_meta(path) -> dict:
+    """Теги и заметка проекта: то, что писал пользователь, а не сканер."""
+    conn = _connect()
+    try:
+        row = conn.execute("SELECT tags, note FROM meta WHERE path = ?", (path,)).fetchone()
+    finally:
+        conn.close()
+    if not row:
+        return {"tags": [], "note": ""}
+    try:
+        tags = json.loads(row[0]) if row[0] else []
+    except ValueError:
+        tags = []
+    return {"tags": tags if isinstance(tags, list) else [], "note": row[1] or ""}
+
+
+def set_tags(path, tags) -> list:
+    """Пишет теги, возвращает нормализованный список."""
+    clean = _clean_tags(tags)
+    conn = _connect()
+    try:
+        conn.execute(
+            "INSERT INTO meta (path, tags, note) VALUES (?,?,?)"
+            " ON CONFLICT(path) DO UPDATE SET tags = excluded.tags",
+            (path, json.dumps(clean, ensure_ascii=False),
+             get_meta(path).get("note", "")))
+        conn.commit()
+    finally:
+        conn.close()
+    return clean
+
+
+def set_note(path, note) -> str:
+    """Пишет заметку (до 2000 символов), возвращает сохранённый текст."""
+    text = str(note or "").strip()[:2000]
+    conn = _connect()
+    try:
+        conn.execute(
+            "INSERT INTO meta (path, tags, note) VALUES (?,?,?)"
+            " ON CONFLICT(path) DO UPDATE SET note = excluded.note",
+            (path, json.dumps(get_meta(path).get("tags", []), ensure_ascii=False), text))
+        conn.commit()
+    finally:
+        conn.close()
+    return text
+
+
+def all_meta() -> dict:
+    """Теги и заметки всех проектов разом — для фида и фильтров."""
+    conn = _connect()
+    try:
+        rows = conn.execute("SELECT path, tags, note FROM meta").fetchall()
+    finally:
+        conn.close()
+    out = {}
+    for path, tags, note in rows:
+        try:
+            tag_list = json.loads(tags) if tags else []
+        except ValueError:
+            tag_list = []
+        out[path] = {"tags": tag_list if isinstance(tag_list, list) else [], "note": note or ""}
+    return out

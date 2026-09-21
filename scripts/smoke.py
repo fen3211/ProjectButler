@@ -100,6 +100,25 @@ def main():
     status, body = request("/api/roots")
     check("GET /api/roots = 200", status == 200, body[:90])
 
+    status, body = request("/api/digest")
+    data = json.loads(body) if status == 200 else {}
+    check("GET /api/digest = диф и цифры", status == 200 and "diff" in data and
+          "junk_bytes" in data and "projects" in data,
+          f"{data.get('projects')} проектов, diff.scans={data.get('diff', {}).get('scans')}")
+
+    status, body = request("/api/feed-version")
+    data = json.loads(body) if status == 200 else {}
+    check("GET /api/feed-version = mtime фида", status == 200 and data.get("mtime", 0) > 0,
+          str(data.get("mtime")))
+
+    status, body = request("/api/search?q=" + quote("Проект"))
+    data = json.loads(body) if status == 200 else {}
+    check("GET /api/search ищет по содержимому", status == 200 and isinstance(data.get("results"), list),
+          f"{len(data.get('results', []))} совпадений")
+
+    status, body = request("/api/tags", "POST", {"path": r"C:\Windows", "tags": ["x"]})
+    check("POST /api/tags вне корня = 403", status == 403, body[:80])
+
     status, body = request("/api/browse")
     data = json.loads(body) if status == 200 else {}
     check("GET /api/browse без пути = диски", status == 200 and isinstance(data.get("drives"), list),
@@ -138,6 +157,20 @@ def main():
         mini = [p for p in feed2.get("projects", []) if p.get("name") == "Mini"]
         check("после фонового скана фид переключился на новую папку", status == 200 and len(mini) == 1,
               f"проектов: {len(feed2.get('projects', []))}")
+
+        status, body = request("/api/tags", "POST", {"path": str(proj), "tags": ["smoke", " тест ", "smoke"]})
+        data = json.loads(body) if status == 200 else {}
+        check("POST /api/tags пишет и нормализует", status == 200 and data.get("tags") == ["smoke", "тест"],
+              str(data.get("tags")))
+        status, body = request("/api/note", "POST", {"path": str(proj), "note": "  привет  "})
+        data = json.loads(body) if status == 200 else {}
+        check("POST /api/note пишет заметку", status == 200 and data.get("note") == "привет",
+              str(data.get("note")))
+        status, body = request("/api/resurrect", "POST", {"path": str(proj)})
+        data = json.loads(body) if status == 200 else {}
+        check("POST /api/resurrect без confirm = план", status == 200 and
+              isinstance(data.get("plan", {}).get("steps"), list) and data["plan"]["steps"],
+              str(data.get("plan", {}).get("steps"))[:90])
 
     status, body = request("/api/root", "POST", {"root": root})
     check("переключение обратно на исходный корень", status == 200, root)
