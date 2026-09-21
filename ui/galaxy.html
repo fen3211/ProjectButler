@@ -75,6 +75,17 @@
   .why li { color: var(--text-dim); font-size: 12px; padding-left: var(--s4); position: relative; }
   .why li::before { content: "▸"; position: absolute; left: var(--s1); color: var(--broken); }
   .why.bonus li::before { content: "+"; color: var(--alive); }
+  .rootbar { display: flex; gap: var(--s2); margin-top: var(--s3); align-items: center; }
+  .rootbar select, .rootbar input {
+    font: inherit; font-size: 12px; color: var(--text);
+    background: rgba(255,255,255,.04); border: 1px solid var(--panel-border);
+    border-radius: 8px; padding: var(--s2) var(--s3); outline: none;
+    transition: border-color 120ms ease, background 120ms ease;
+  }
+  .rootbar select:hover, .rootbar input:hover { background: rgba(255,255,255,.07); }
+  .rootbar select:focus, .rootbar input:focus { border-color: rgba(125,211,252,.5); }
+  .rootbar select { max-width: 200px; cursor: pointer; }
+  .rootbar input { flex: 1; min-width: 0; font-family: Consolas, "Cascadia Mono", monospace; }
   .actions { display: flex; flex-wrap: wrap; gap: var(--s2); margin-top: var(--s4); }
   button {
     font: inherit; font-size: 13px; cursor: pointer; padding: var(--s2) var(--s3);
@@ -109,6 +120,12 @@
     <div class="sub" id="root">загрузка…</div>
     <div class="stats" id="stats"></div>
     <div class="chips" id="chips"></div>
+    <div class="rootbar">
+      <select id="rootSelect" title="Известные папки сканирования"></select>
+      <input id="rootInput" type="text" placeholder="D:\Projects" spellcheck="false" autocomplete="off"
+             title="Путь к папке с проектами">
+      <button id="rootApply" title="Просканировать выбранную папку">ОК</button>
+    </div>
   </div>
   <div class="legend" id="legend"></div>
 </div>

@@ -34,6 +34,16 @@ def remember_root(root) -> None:
     save_config(cfg)
 
 
+def known_roots() -> list:
+    """История корней для селектора в UI: сначала последний, без дублей, только живые пути."""
+    cfg = load_config()
+    out = []
+    for candidate in [cfg.get("last_root"), *(cfg.get("roots") or [])]:
+        if candidate and os.path.isdir(str(candidate)) and str(candidate) not in out:
+            out.append(str(candidate))
+    return out
+
+
 def resolve_root(root=None, use_config=True) -> str:
     """Кто первый встал — того и тапки: аргумент, env BUTLER_ROOT, конфиг, D:\\Projects."""
     if root:

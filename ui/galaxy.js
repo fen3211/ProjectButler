@@ -30,6 +30,9 @@ const ui = {
   tip: document.getElementById('tip'),
   status: document.getElementById('status'),
   error: document.getElementById('error'),
+  rootSelect: document.getElementById('rootSelect'),
+  rootInput: document.getElementById('rootInput'),
+  rootApply: document.getElementById('rootApply'),
 };
 
 function say(text) { ui.status.textContent = text; }
@@ -70,8 +73,62 @@ async function init(rescan) {
   }
   buildStars();
   renderHud();
+  loadRoots();
   say('готово: ' + state.feed.projects.length + ' проектов, фид от ' + state.feed.generated_at_iso);
 }
+
+/* ---------- выбор папки сканирования ---------- */
+
+async function loadRoots() {
+  try {
+    const data = await api('/api/roots');
+    ui.rootSelect.innerHTML = '';
+    const all = data.current && !data.roots.includes(data.current)
+      ? [data.current, ...data.roots] : data.roots;
+    all.forEach((root) => {
+      const opt = document.createElement('option');
+      opt.value = root;
+      opt.textContent = root;
+      if (root === data.current) opt.selected = true;
+      ui.rootSelect.append(opt);
+    });
+    if (document.activeElement !== ui.rootInput) {
+      ui.rootInput.value = data.current || '';
+    }
+  } catch (err) {
+    say('не удалось получить список папок: ' + err.message);
+  }
+}
+
+async function applyRoot() {
+  const root = (ui.rootInput.value || '').trim();
+  if (!root) { say('укажи папку, гений'); return; }
+  ui.rootApply.disabled = true;
+  say('сканирую ' + root + ' …');
+  try {
+    const res = await api('/api/root', { root });
+    state.selected = null;
+    ui.panel.classList.remove('open');
+    state.hidden.clear();
+    state.feed = await api('/galaxy.json');
+    buildStars();
+    renderHud();
+    loadRoots();
+    say('папка: ' + res.root + ' — проектов ' + res.totals.projects + ', TODO ' + res.totals.todos);
+  } catch (err) {
+    fail('Не переключил папку: ' + err.message);
+  } finally {
+    ui.rootApply.disabled = false;
+  }
+}
+
+ui.rootSelect.addEventListener('change', () => {
+  if (ui.rootSelect.value) ui.rootInput.value = ui.rootSelect.value;
+});
+ui.rootApply.addEventListener('click', applyRoot);
+ui.rootInput.addEventListener('keydown', (ev) => {
+  if (ev.key === 'Enter') applyRoot();
+});
 
 function buildStars() {
   const feed = state.feed;

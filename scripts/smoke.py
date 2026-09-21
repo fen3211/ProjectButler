@@ -79,6 +79,30 @@ def main():
     check("скан нашёл проекты", scanned.get("totals", {}).get("projects", 0) > 0,
           f"{scanned.get('totals', {}).get('projects', 0)} проектов")
 
+    status, body = request("/api/roots")
+    check("GET /api/roots = 200", status == 200, body[:90])
+
+    status, body = request("/api/root", "POST", {"root": ""})
+    check("POST /api/root пустой путь = 400", status == 400, body[:80])
+
+    status, body = request("/api/root", "POST", {"root": r"C:\No\Such\Folder\Ever42"})
+    check("POST /api/root нет такой папки = 400", status == 400, body[:80])
+
+    # переключение на временную папку с одним мини-проектом, потом обратно
+    import tempfile
+    with tempfile.TemporaryDirectory() as tmp:
+        proj = Path(tmp) / "Mini"
+        proj.mkdir()
+        (proj / "README.md").write_text("# Mini\n", encoding="utf-8")
+        (proj / "requirements.txt").write_text("requests\n", encoding="utf-8")
+        status, body = request("/api/root", "POST", {"root": tmp})
+        switched = json.loads(body) if status == 200 else {}
+        check("POST /api/root переключает и сканирует", status == 200 and
+              switched.get("totals", {}).get("projects") == 1,
+              f"проектов: {switched.get('totals', {}).get('projects')}")
+    status, body = request("/api/root", "POST", {"root": root})
+    check("переключение обратно на исходный корень", status == 200, root)
+
     status, body = request("/api/open", "POST", {"path": r"C:\Windows", "with": "explorer"})
     check("POST /api/open вне корня = 403", status == 403, body[:80])
 

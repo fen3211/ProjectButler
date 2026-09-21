@@ -122,11 +122,26 @@ class ButlerHandler(BaseHTTPRequestHandler):
             root = norm_root(self.root)
             nodes = [galaxy_node(r, root) for r in list_projects(root)]
             return self._json(summarize(nodes))
+        if path == "/api/roots":
+            return self._json({"current": self.root, "roots": config.known_roots()})
         return self._error(404, f"Нет такого маршрута: {path}")
 
     def do_POST(self):                                   # noqa: N802
         path = self.path.split("?", 1)[0]
         args = self._body()
+        if path == "/api/root":
+            new_root = str(args.get("root") or "").strip()
+            if not new_root:
+                return self._error(400, "Путь пустой — укажи папку")
+            if not os.path.isdir(new_root):
+                return self._error(400, f"Папка не найдена: {new_root}")
+            new_root = norm_root(new_root)
+            save_projects(scan(new_root), new_root)
+            config.remember_root(new_root)
+            feed = build_feed(new_root, list_projects(new_root))
+            write_feed(config.FEED_PATH, feed)
+            self.server.butler_root = new_root          # сервер смотрит туда, куда выбрал пользователь
+            return self._json({"ok": True, "root": new_root, "totals": feed["totals"]})
         if path == "/api/scan":
             root = norm_root(args.get("root") or self.root)
             if not os.path.isdir(root):
