@@ -19,6 +19,7 @@
 | Доктор | диагностика окружения: git/python/node в PATH, venv, `pip check`, `npm ls` — только чтение |
 | История | каждый скан пишет снапшот score; в карточке спарклайн, `butler diff` — что изменилось |
 | Галактика | браузерный 3D-визуал: кластеры по стеку, свечение по score, ринг — по статусу; клик открывает папку |
+| Пикер папок | «обзор» в UI: дерево дисков и подпапок (`/api/browse`), скрытые/системные папки отфильтрованы, скан выбранной в один клик |
 | MCP-сервер | 13 инструментов для Claude / Cline по stdio (без SDK) |
 | sqlite-база | `~/.project-butler/butler.db`, миграции без потери данных |
 
@@ -59,6 +60,7 @@ py -3.12 -m butler mcp                    :: MCP-сервер по stdio
 - `R` — пересканировать, `Esc` — сброс вида
 
 API маршруты: `GET /galaxy.json`, `GET /api/projects`, `GET /api/stacks`,
+`GET /api/browse` (диски и подпапки для пикера),
 `POST /api/scan`, `POST /api/open` (пути вне корня — 403).
 
 ## MCP-сервер (Claude Desktop / Cline)
@@ -88,7 +90,7 @@ API маршруты: `GET /galaxy.json`, `GET /api/projects`, `GET /api/stacks`
 ## Тесты
 
 ```bat
-py -3.12 -m unittest discover -s tests -v   :: 23 юнит-теста, включая MCP-хендшейк
+py -3.12 -m unittest discover -s tests -v   :: 30 юнит-тестов, включая MCP-хендшейк и пикер папок
 py -3.12 scripts\smoke.py D:\Projects       :: e2e: сервер + API, открытие папок под заглушкой
 ```
 

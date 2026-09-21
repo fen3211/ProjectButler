@@ -2,6 +2,8 @@
 import json
 import os
 import shutil
+import stat
+import string
 import subprocess
 import sys
 import threading
@@ -59,11 +61,94 @@ def _within(path, root) -> bool:
         return False                                   # на Windows: пути на разных дисках
 
 
+class ScanState:
+    """Один фоновый скан за раз: UI получает ответ мгновенно и опрашивает статус.
+    Синхронный скан большого диска жил дольше таймаута браузера — отсюда «Failed to fetch»."""
+
+    def __init__(self):
+        self._lock = threading.Lock()
+        self.running = False
+        self.root = None
+        self.error = None
+
+    def start(self, root, work) -> bool:
+        """True — джоба запущена; False — уже идёт другой скан (409 в UI)."""
+        with self._lock:
+            if self.running:
+                return False
+            self.running = True
+            self.root = root
+            self.error = None
+
+        def run():
+            try:
+                work()
+            except Exception as exc:                        # noqa: BLE001 — статус уйдёт в UI
+                self.error = f"скан не удался: {exc}"
+            finally:
+                with self._lock:
+                    self.running = False
+
+        threading.Thread(target=run, daemon=True).start()
+        return True
+
+    def status(self) -> dict:
+        with self._lock:
+            return {"running": self.running, "root": self.root, "error": self.error}
+
+
 class ButlerHTTPServer(ThreadingHTTPServer):
     """На Windows http.server разрешает двойной биндинг порта (allow_reuse_address=1).
     Нам второй экземпляр не нужен никогда — пусть громко падает при старте."""
     allow_reuse_address = False
     daemon_threads = True
+
+    def __init__(self, *args, **kwargs):
+        super().__init__(*args, **kwargs)
+        self.butler_scan = ScanState()
+
+
+def _list_drives() -> list:
+    """Доступные диски A–Z: перебор дешёвый, зато без win32-API зависимостей."""
+    return [d + ":\\" for d in string.ascii_uppercase if os.path.isdir(d + ":\\")]
+
+
+def _browse(path: str) -> dict:
+    """Содержимое папки для пикера в UI: без файлов, симлинок и системного мусора."""
+    raw = (path or "").strip()
+    if not raw:
+        return {"path": "", "parent": None, "drives": _list_drives(), "dirs": []}
+    if len(raw) == 2 and raw.endswith(":"):
+        raw += "\\"                               # голый "C:" — это cwd диска, а не корень
+    try:
+        base = Path(raw).resolve(strict=True)
+    except (OSError, RuntimeError):
+        return {"error": f"Папка не найдена: {raw}"}
+    if not base.is_dir():
+        return {"error": f"Это не папка: {raw}"}
+    try:
+        children = sorted(base.iterdir(), key=lambda p: p.name.lower())
+    except OSError as exc:
+        return {"error": f"Не прочиталось: {exc}"}
+    dirs = []
+    for child in children:
+        name = child.name
+        if name.startswith((".", "$")) or name.lower() == "system volume information":
+            continue
+        try:
+            if child.is_symlink() or not child.is_dir():
+                continue
+            attrs = getattr(os.stat(child, follow_symlinks=False), "st_file_attributes", 0)
+        except OSError:
+            continue                              # недоступное — просто не показываем
+        if attrs & (getattr(stat, "FILE_ATTRIBUTE_HIDDEN", 2) |
+                    getattr(stat, "FILE_ATTRIBUTE_SYSTEM", 4)):
+            continue
+        dirs.append(name)
+        if len(dirs) >= 800:                      # патологические папки не утащим в JSON целиком
+            break
+    parent = str(base.parent) if base.parent != base else None
+    return {"path": str(base), "parent": parent, "drives": _list_drives(), "dirs": dirs}
 
 
 class ButlerHandler(BaseHTTPRequestHandler):
@@ -141,6 +226,14 @@ class ButlerHandler(BaseHTTPRequestHandler):
             return self._json(summarize(nodes))
         if path == "/api/roots":
             return self._json({"current": self.root, "roots": config.known_roots()})
+        if path == "/api/scan-status":
+            return self._json(self.server.butler_scan.status())
+        if path == "/api/browse":
+            target = (parse_qs(urlsplit(self.path).query).get("path") or [""])[0]
+            data = _browse(target)
+            if "error" in data:
+                return self._error(400, data["error"])
+            return self._json(data)
         if path == "/api/diff":
             return self._json(diff_scans(norm_root(self.root)))
         if path == "/api/history":
@@ -160,21 +253,33 @@ class ButlerHandler(BaseHTTPRequestHandler):
             if not os.path.isdir(new_root):
                 return self._error(400, f"Папка не найдена: {new_root}")
             new_root = norm_root(new_root)
-            save_projects(scan(new_root), new_root)
-            config.remember_root(new_root)
-            feed = build_feed(new_root, list_projects(new_root))
-            write_feed(config.FEED_PATH, feed)
-            self.server.butler_root = new_root          # сервер смотрит туда, куда выбрал пользователь
-            return self._json({"ok": True, "root": new_root, "totals": feed["totals"]})
+
+            def switch_work():
+                save_projects(scan(new_root), new_root)
+                config.remember_root(new_root)
+                feed = build_feed(new_root, list_projects(new_root))
+                write_feed(config.FEED_PATH, feed)
+                self.server.butler_root = new_root      # сервер смотрит туда, куда выбрал пользователь
+
+            if not self.server.butler_scan.start(new_root, switch_work):
+                return self._error(409, "Скан уже идёт — дождись окончания")
+            return self._json({"ok": True, "root": new_root, "scanning": True})
         if path == "/api/scan":
             root = norm_root(args.get("root") or self.root)
             if not os.path.isdir(root):
                 return self._error(400, f"Папка не найдена: {root}")
-            save_projects(scan(root), root)
-            config.remember_root(root)
-            feed = build_feed(root, list_projects(root))
-            write_feed(config.FEED_PATH, feed)
-            return self._json({"ok": True, "root": root, "totals": feed["totals"]})
+
+            def rescan_work():
+                save_projects(scan(root), root)
+                config.remember_root(root)
+                feed = build_feed(root, list_projects(root))
+                write_feed(config.FEED_PATH, feed)
+                if root == norm_root(self.root):
+                    self.server.butler_root = root
+
+            if not self.server.butler_scan.start(root, rescan_work):
+                return self._error(409, "Скан уже идёт — дождись окончания")
+            return self._json({"ok": True, "root": root, "scanning": True})
         if path == "/api/open":
             target = args.get("path") or ""
             if not _within(target, self.root):
@@ -294,16 +399,11 @@ def serve(root=None, port=17373, open_browser=True):
     httpd.butler_root = root
     url = f"http://127.0.0.1:{port}/"
 
-    def refresh_in_background():
-        """При старте обновляем данные: UI сразу показывает прошлый скан,
-        а через пару секунд приходит свежий (диск-вес и секреты ходят по файлам)."""
-        try:
-            save_projects(scan(root), root)
-            write_feed(config.FEED_PATH, build_feed(root, list_projects(root)))
-        except Exception as exc:                            # noqa: BLE001 — UI не должен падать из-за фона
-            sys.stderr.write(f"butler-ui: фоновый перескан не удался: {exc}\n")
+    def startup_scan():
+        save_projects(scan(root), root)
+        write_feed(config.FEED_PATH, build_feed(root, list_projects(root)))
 
-    threading.Thread(target=refresh_in_background, daemon=True).start()
+    httpd.butler_scan.start(root, startup_scan)     # через тот же ScanState: без гонок с ручным сканом
     print(f"Project Butler UI: {url}\nкорень: {root}\nфид: {config.FEED_PATH}\nCtrl+C — стоп.")
     if open_browser:
         threading.Timer(0.6, lambda: webbrowser.open(url)).start()

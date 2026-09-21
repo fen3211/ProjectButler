@@ -8,8 +8,8 @@ import sys
 import threading
 import urllib.error
 import urllib.request
-from http.server import ThreadingHTTPServer
 from pathlib import Path
+from urllib.parse import quote
 
 PROJECT_DIR = Path(__file__).resolve().parent.parent
 sys.path.insert(0, str(PROJECT_DIR))
@@ -46,7 +46,7 @@ def main():
     opened = []
     webserver._open_target = lambda path, how: (opened.append((path, how)), "stub")[1]
 
-    httpd = ThreadingHTTPServer(("127.0.0.1", PORT), webserver.ButlerHandler)
+    httpd = webserver.ButlerHTTPServer(("127.0.0.1", PORT), webserver.ButlerHandler)
     httpd.butler_root = root
     threading.Thread(target=httpd.serve_forever, daemon=True).start()
     print(f"сервер: http://127.0.0.1:{PORT}  корень: {root}\n")
@@ -73,14 +73,45 @@ def main():
     feed = json.loads(body) if status == 200 else {}
     check("фид содержит проекты", bool(feed.get("projects")), f"{len(feed.get('projects', []))} шт.")
 
+    import time as _time
+
+    def wait_scan(seconds=180):
+        deadline = _time.time() + seconds
+        while _time.time() < deadline:
+            status, body = request("/api/scan-status")
+            data = json.loads(body) if status == 200 else {}
+            if not data.get("running"):
+                return data
+            _time.sleep(0.3)
+        return {"running": True, "error": "таймаут ожидания скана"}
+
     status, body = request("/api/scan", "POST", {})
-    check("POST /api/scan = 200", status == 200, body[:120])
+    check("POST /api/scan отвечает мгновенно и уходит в фон", status == 200, body[:120])
+    scanned = json.loads(body) if status == 200 else {}
+    check("POST /api/scan = фоновый режим", scanned.get("scanning") is True, body[:80])
+    finished = wait_scan()
+    check("фоновый скан завершился без ошибок", not finished.get("running") and not finished.get("error"),
+          str(finished.get("error") or "ok"))
+    status, body = request("/galaxy.json")
     scanned = json.loads(body) if status == 200 else {}
     check("скан нашёл проекты", scanned.get("totals", {}).get("projects", 0) > 0,
           f"{scanned.get('totals', {}).get('projects', 0)} проектов")
 
     status, body = request("/api/roots")
     check("GET /api/roots = 200", status == 200, body[:90])
+
+    status, body = request("/api/browse")
+    data = json.loads(body) if status == 200 else {}
+    check("GET /api/browse без пути = диски", status == 200 and isinstance(data.get("drives"), list),
+          ", ".join(data.get("drives", [])[:8]))
+
+    status, body = request("/api/browse?path=" + quote("D:/"))
+    data = json.loads(body) if status == 200 else {}
+    check("GET /api/browse D:/ = подпапки", status == 200 and isinstance(data.get("dirs"), list)
+          and not data.get("error"), f"{len(data.get('dirs', []))} папок")
+
+    status, body = request("/api/browse?path=" + quote("X:/No/Such/Dir42"))
+    check("GET /api/browse битый путь = 400", status == 400, body[:80])
 
     status, body = request("/api/root", "POST", {"root": ""})
     check("POST /api/root пустой путь = 400", status == 400, body[:80])
@@ -97,11 +128,22 @@ def main():
         (proj / "requirements.txt").write_text("requests\n", encoding="utf-8")
         status, body = request("/api/root", "POST", {"root": tmp})
         switched = json.loads(body) if status == 200 else {}
-        check("POST /api/root переключает и сканирует", status == 200 and
-              switched.get("totals", {}).get("projects") == 1,
-              f"проектов: {switched.get('totals', {}).get('projects')}")
+        check("POST /api/root отвечает мгновенно и уходит в фон", status == 200 and
+              switched.get("scanning") is True, body[:80])
+        finished = wait_scan()
+        check("фоновый скан временной папки завершился без ошибок", not finished.get("running")
+              and not finished.get("error"), str(finished.get("error") or "ok"))
+        status, body = request("/galaxy.json")
+        feed2 = json.loads(body) if status == 200 else {}
+        mini = [p for p in feed2.get("projects", []) if p.get("name") == "Mini"]
+        check("после фонового скана фид переключился на новую папку", status == 200 and len(mini) == 1,
+              f"проектов: {len(feed2.get('projects', []))}")
+
     status, body = request("/api/root", "POST", {"root": root})
     check("переключение обратно на исходный корень", status == 200, root)
+    finished = wait_scan()
+    check("обратный фоновый скан завершился", not finished.get("running") and not finished.get("error"),
+          str(finished.get("error") or "ok"))
 
     status, body = request("/api/open", "POST", {"path": r"C:\Windows", "with": "explorer"})
     check("POST /api/open вне корня = 403", status == 403, body[:80])
