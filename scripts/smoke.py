@@ -145,6 +145,9 @@ def main():
         proj.mkdir()
         (proj / "README.md").write_text("# Mini\n", encoding="utf-8")
         (proj / "requirements.txt").write_text("requests\n", encoding="utf-8")
+        (proj / "bot.py").write_text(
+            "import os\nTOKEN = os.getenv('BOT_TOKEN')\n"
+            "# TODO заложить телеметрию\nprint('mini')\n", encoding="utf-8")
         status, body = request("/api/root", "POST", {"root": tmp})
         switched = json.loads(body) if status == 200 else {}
         check("POST /api/root отвечает мгновенно и уходит в фон", status == 200 and
@@ -171,6 +174,23 @@ def main():
         check("POST /api/resurrect без confirm = план", status == 200 and
               isinstance(data.get("plan", {}).get("steps"), list) and data["plan"]["steps"],
               str(data.get("plan", {}).get("steps"))[:90])
+
+        status, body = request("/api/search?q=" + quote("телеметрию"))
+        data = json.loads(body) if status == 200 else {}
+        hit = next((r for r in data.get("results", []) if r.get("name") == "Mini"), None)
+        check("GET /api/search находит по TODO-тексту", status == 200 and hit is not None
+              and "TODO" in (hit.get("where") or ""), str(hit))
+
+        status, body = request("/api/readme", "POST", {"path": str(proj)})
+        data = json.loads(body) if status == 200 else {}
+        check("POST /api/readme не трогает рукописный", status == 200 and data.get("written") is False,
+              str(data.get("reason")))
+
+        status, body = request("/api/doctor", "POST", {"path": str(proj)})
+        data = json.loads(body) if status == 200 else {}
+        names = [c.get("check") for c in data.get("checks", [])]
+        check("POST /api/doctor даёт проверки окружения", status == 200 and len(names) >= 2,
+              ", ".join(names[:4]))
 
     status, body = request("/api/root", "POST", {"root": root})
     check("переключение обратно на исходный корень", status == 200, root)

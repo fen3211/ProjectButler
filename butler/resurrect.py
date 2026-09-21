@@ -145,6 +145,16 @@ def resurrect(root, stacks, log) -> dict:
         else:
             log("• npm install (это может занять минуты)…")
             result["deps"] = _run(["npm", "install"], root, log)
+        pkg = os.path.join(root, "package.json")
+        try:
+            with open(pkg, "r", encoding="utf-8", errors="replace") as fh:
+                engines = (json.load(fh).get("engines") or {}).get("node")
+        except (OSError, ValueError):
+            engines = None
+        if engines and not os.path.exists(os.path.join(root, ".nvmrc")):
+            log(f"• подсказка: в package.json engines.node = {engines} — "
+                "зафиксируй её в .nvmrc, чтобы node-версия не гуляла")
+            result["notes"].append("nvmrc hint")
 
     log("• собираю .env.example из чтений env в коде…")
     names = generate_env_example(root)

@@ -621,5 +621,53 @@ class RunDetectTest(unittest.TestCase):
         self.assertIsNone(runner.detect_command(str(self.root), []))
 
 
+class DoctorParseTest(unittest.TestCase):
+    """git_ahead_behind: разбирает [ahead N, behind M] в любых комбинациях."""
+
+    def test_parse_variants(self):
+        from butler import doctor
+        self.assertEqual(doctor.git_ahead_behind("## main...origin/main [ahead 1, behind 2]"), (1, 2))
+        self.assertEqual(doctor.git_ahead_behind("## main...origin/main [ahead 3]"), (3, 0))
+        self.assertEqual(doctor.git_ahead_behind("## main...origin/main [behind 4]"), (0, 4))
+        self.assertEqual(doctor.git_ahead_behind("## main"), (0, 0))
+        self.assertEqual(doctor.git_ahead_behind(""), (0, 0))
+
+
+class ReadmeGenTest(unittest.TestCase):
+    """Генерация README: пишет только при отсутствии, содержит стек и запуск."""
+
+    def setUp(self):
+        self.tmp = tempfile.TemporaryDirectory()
+        self.root = Path(self.tmp.name).resolve()
+        make_project(self.root, "Alpha", {"README.md": "# Рукописный", "app.py": "print(1)\n"})
+
+    def tearDown(self):
+        self.tmp.cleanup()
+
+    def test_skips_existing_readme(self):
+        from butler import readme_gen
+        proj = self.root / "Alpha"
+        rec = {"name": "Alpha", "stacks": ["python"], "facts": {"deps": ["requests"]},
+               "path": str(proj)}
+        result = readme_gen.generate(str(proj), rec, None)
+        self.assertFalse(result["written"])
+        self.assertEqual((proj / "README.md").read_text(encoding="utf-8"), "# Рукописный")
+
+    def test_generates_when_missing(self):
+        from butler import readme_gen
+        proj = self.root / "Alpha"
+        (proj / "README.md").unlink()
+        rec = {"name": "Alpha", "stacks": ["python", "git"], "facts": {"deps": ["requests"]},
+               "path": str(proj), "todo_count": 3}
+        plan = {"cmd": ["py", "-3.12", "app.py"], "kind": "python"}
+        result = readme_gen.generate(str(proj), rec, plan)
+        self.assertTrue(result["written"])
+        text = (proj / "README.md").read_text(encoding="utf-8")
+        self.assertIn("# Alpha", text)
+        self.assertIn("- requests", text)
+        self.assertIn("py -3.12 app.py", text)
+        self.assertIn("TODO", text)
+
+
 if __name__ == "__main__":
     unittest.main(verbosity=2)

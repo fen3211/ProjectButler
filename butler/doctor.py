@@ -1,10 +1,24 @@
 """Диагностика окружения проекта: только чтение, ничего не устанавливает."""
+import json
+import re
 import shutil
 import subprocess
 from pathlib import Path
 
 SYSTEM_TOOLS = ("git", "node", "npm", "python", "py", "ffmpeg", "ffprobe",
                 "dotnet", "docker", "code")
+
+
+def git_ahead_behind(status_line) -> tuple:
+    """'## main...origin/main [ahead 1, behind 2]' → (1, 2). Без скобок → (0, 0)."""
+    ahead = behind = 0
+    m = re.search(r"ahead\s+(\d+)", status_line or "")
+    if m:
+        ahead = int(m.group(1))
+    m = re.search(r"behind\s+(\d+)", status_line or "")
+    if m:
+        behind = int(m.group(1))
+    return ahead, behind
 
 
 def system_tools() -> dict:
@@ -42,12 +56,31 @@ def diagnose(rec, timeout=20) -> list:
     tools = system_tools()
 
     def add(name, ok, detail=""):
-        checks.append({"check": name, "ok": bool(ok), "detail": str(detail)})
+        # ok=None — проверка не состоялась (таймаут, нет сети): не считаем проблемой
+        checks.append({"check": name, "ok": None if ok is None else bool(ok),
+                       "detail": str(detail)})
 
     if "git" in stacks:
-        add("git в PATH", tools.get("git") is not None, tools.get("git") or "не найден")
+        git_exe = tools.get("git")
+        add("git в PATH", git_exe is not None, git_exe or "не найден")
         branch = facts.get("branch", "?")
         add("текущая ветка", branch not in ("?", "", None), branch)
+        if git_exe:
+            code, out = _run([git_exe, "status", "--porcelain"], path, timeout)
+            if code == 0:
+                dirty = len([l for l in out.splitlines() if l.strip()])
+                add("незакоммиченное", dirty == 0,
+                    "чисто" if not dirty else f"{dirty} файлов ждут коммита")
+            code, out = _run([git_exe, "status", "-sb"], path, timeout)
+            if code == 0:
+                first = out.splitlines()[0] if out else ""
+                if "..." not in first:
+                    add("синхронизация с origin", None, "нет upstream-ветки")
+                else:
+                    ahead, behind = git_ahead_behind(first)
+                    add("синхронизация с origin", ahead == 0 and behind == 0,
+                        "синхронизировано" if ahead == 0 and behind == 0
+                        else f"впереди на {ahead}, позади на {behind}")
     else:
         add("git-репозиторий", False, "нет .git — крести кнопкой в UI")
 
@@ -60,14 +93,51 @@ def diagnose(rec, timeout=20) -> list:
         if venv and facts.get("deps"):
             code, out = _run([str(venv), "-m", "pip", "check"], path, timeout)
             add("pip check", code == 0, out or "зависимости целые")
+            # устаревшие пакеты: ходит в PyPI, потому с щедрым таймаутом и мягким исходом
+            code, out = _run([str(venv), "-m", "pip", "list", "--outdated"], path, 40)
+            if code is None:
+                add("устаревшие пакеты (pip)", None, out or "не успел проверить")
+            elif code == 0:
+                stale = max(0, len([l for l in out.splitlines() if l.strip()]) - 2)
+                add("устаревшие пакеты (pip)", stale == 0,
+                    "все свежие" if not stale else f"устарело: {stale}")
+            else:
+                add("устаревшие пакеты (pip)", None, out[:80] or "pip отказался отвечать")
 
     if "node" in stacks or "js" in stacks:
-        add("node в PATH", tools.get("node") is not None, tools.get("node") or "не найден")
+        node_exe = tools.get("node")
+        add("node в PATH", node_exe is not None, node_exe or "не найден")
         npm = tools.get("npm")
         if npm and facts.get("has_node_modules"):
             # npm на Windows — это .cmd, зовём через cmd /c
             code, out = _run(["cmd", "/c", npm, "ls", "--depth=0"], path, timeout * 2)
             add("npm ls --depth=0", code == 0, out or "дерево зависимостей целое")
+        pkg = Path(path) / "package.json"
+        if pkg.exists() and node_exe:
+            try:
+                with open(pkg, "r", encoding="utf-8", errors="replace") as fh:
+                    engines = (json.load(fh).get("engines") or {}).get("node")
+            except (OSError, ValueError):
+                engines = None
+            if engines:
+                code, out = _run([node_exe, "--version"], path, timeout)
+                m = re.match(r"v?(\d+)", out or "")
+                installed = int(m.group(1)) if (code == 0 and m) else None
+                required = re.search(r"(\d+)", engines)
+                if installed is None or not required:
+                    add("версия node vs engines", None, f"не смог сравнить с {engines}")
+                else:
+                    ok = installed >= int(required.group(1))
+                    add("версия node vs engines", ok,
+                        f"требуется {engines}, установлена v{installed}")
+        if npm and facts.get("has_node_modules"):
+            code, out = _run(["cmd", "/c", npm, "outdated", "--depth=0"], path, 40)
+            if code is None:
+                add("устаревшие пакеты (npm)", None, out or "не успел проверить")
+            else:
+                stale = len([l for l in out.splitlines() if l.strip()])
+                add("устаревшие пакеты (npm)", code == 0 and stale == 0,
+                    "все свежие" if stale == 0 else f"устарело: {stale}")
 
     entry = facts.get("entry")
     if entry:
@@ -79,6 +149,15 @@ def diagnose(rec, timeout=20) -> list:
 
     if "docker" in stacks:
         add("docker в PATH", tools.get("docker") is not None, tools.get("docker") or "не найден")
+        compose = Path(path) / "docker-compose.yml"
+        if not compose.exists():
+            compose = Path(path) / "compose.yml"
+        if compose.exists() and tools.get("docker"):
+            code, out = _run([tools["docker"], "compose", "-f", compose.name,
+                              "config", "--quiet"], path, timeout * 2)
+            add("docker compose config", code == 0, out or "конфигурация валидна")
+        elif not compose.exists():
+            add("docker compose config", None, "docker-compose.yml не найден")
 
     return checks
 
@@ -86,9 +165,9 @@ def diagnose(rec, timeout=20) -> list:
 def format_report(rec, checks) -> str:
     lines = [f"Диагностика: {rec.get('name')} — {rec.get('path')}", ""]
     for c in checks:
-        mark = "✓" if c["ok"] else "✗"
+        mark = "◐" if c["ok"] is None else ("✓" if c["ok"] else "✗")
         lines.append(f"  {mark} {c['check']}: {c['detail'] or 'ок'}")
-    broken = sum(1 for c in checks if not c["ok"])
+    broken = sum(1 for c in checks if c["ok"] is False)
     lines.append("")
     lines.append("всё зелёное" if not broken else f"проблем: {broken}")
     return "\n".join(lines)

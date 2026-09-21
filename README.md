@@ -16,7 +16,7 @@
 | Диск | вес проектов и мусорных директорий (node_modules/.venv/…), кнопка «снести» в UI |
 | Дубликаты | Жаккар-схожесть по зависимостям/README/структуре, розовые пунктирные рёбра в галактике |
 | Секреты | токены ботов, ключи OpenAI/Google/AWS и пароли в коде, замаскированные превью; `.env` вне `.gitignore` |
-| Доктор | диагностика окружения: git/python/node в PATH, venv, `pip check`, `npm ls` — только чтение |
+| Доктор | диагностика: git/python/node/docker, venv, `pip check`, `npm ls`, uncommitted, ahead/behind, docker compose config, node vs engines, pip/npm outdated — только чтение; таймауты — мягкий «◐» |
 | История | каждый скан пишет снапшот score; в карточке спарклайн, `butler diff` — что изменилось |
 | Галактика | браузерный 3D-визуал: кластеры по стеку, свечение по score, ринг — по статусу; клик открывает папку |
 | Пикер папок | «обзор» в UI: дерево дисков и подпапок (`/api/browse`), скрытые/системные папки отфильтрованы, скан выбранной в один клик |
@@ -96,7 +96,7 @@ API маршруты: `GET /galaxy.json`, `GET /api/projects`, `GET /api/stacks`
 ## Тесты
 
 ```bat
-py -3.12 -m unittest discover -s tests -v   :: 39 юнит-тестов: MCP, пикер папок, теги, resurrect, run-детект
+py -3.12 -m unittest discover -s tests -v   :: 42 юнит-теста: MCP, пикер, теги, resurrect, run-детект, doctor, README
 py -3.12 scripts\smoke.py D:\Projects       :: e2e: сервер + API, открытие папок под заглушкой
 ```
 
@@ -127,7 +127,7 @@ run.bat
 
 ## Дальше
 
-- [ ] День 2 по PLAN: `pip check` / `npm ls` в режиме «доктор» (только чтение)
+- [x] День 2 по PLAN: `pip check` / `npm ls` в режиме «доктор» (только чтение)
 - [x] Теги и заметки пользователя к проектам
 - [x] Resurrect: `.venv` в песочнице + генерация `.env.example` из чтения env
 - [x] История score во времени (график в галактике)

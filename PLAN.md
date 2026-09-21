@@ -14,35 +14,35 @@
 ## 3. Функционал
 
 ### MVP 0.1 — "Зеркало" (только показывает, ничего не чинит)
-- [ ] Сканер папок: обход на 1 уровень вглубь, игнор `node_modules`, `.venv`, `__pycache__`, `.git/objects`
-- [ ] Детекторы по файлам-маркерам:
+- [x] Сканер папок: обход на 1 уровень вглубь, игнор `node_modules`, `.venv`, `__pycache__`, `.git/objects` (фактически — до 3 уровней)
+- [x] Детекторы по файлам-маркерам:
   - Node: `package.json`
   - Python: `requirements.txt` / `pyproject.toml` / `*.py`
   - Docker: `Dockerfile` / `docker-compose.yml`
   - Git: `.git`
   - C#: `*.sln` / `*.csproj`
   - Go: `go.mod`
-- [ ] Сбор полей: name, path, stacks[], mtime, size, has_readme, has_env, has_venv/node_modules, git_status
-- [ ] Health-score 0-100: -20 нет README, -20 нет гита, -20 протухшие зависимости (эвристика), -20 нет .env.example при наличии чтения env в коде
-- [ ] Дашборд: список + фильтр по стеку/статусу/дате + поиск по имени/README/зависимостям/TODO
-- [ ] Карточка проекта: статус (alive/broken/unknown/abandoned>6мес), кнопки Открыть в VSCode / папке / терминале
-- [ ] CLI: `python -m butler scan D:\Projects` печатает таблицу
+- [x] Сбор полей: name, path, stacks[], mtime, size, has_readme, has_env, has_venv/node_modules, git_status
+- [x] Health-score 0-100: -20 нет README, -20 нет гита, -20 протухшие зависимости (эвристика), -20 нет .env.example при наличии чтения env в коде
+- [x] Дашборд: список + фильтр по стеку/статусу/дате + поиск по имени/README/зависимостям/TODO (роль дашборда играет галактика + док + `/api/search`)
+- [x] Карточка проекта: статус (alive/broken/unknown/abandoned>6мес), кнопки Открыть в VSCode / папке / терминале
+- [x] CLI: `python -m butler scan D:\Projects` печатает таблицу
 
 ### 0.2 — "Доктор" (диагностика, только чтение)
-- [ ] Python: venv есть/нет, `pip check` (без установки)
-- [ ] Node: `npm ls`, версия node в package.json vs установленная
-- [ ] Docker: `docker compose config` валиден/нет
-- [ ] Git: uncommitted, behind/ahead, текущая ветка
-- [ ] TODO-грепер: TODO/FIXME/HACK/XXX с файлом и строкой
-- [ ] Устаревшие зависимости: `npm outdated`, `pip list --outdated` (только чтение)
+- [x] Python: venv есть/нет, `pip check` (без установки)
+- [x] Node: `npm ls`, версия node в package.json vs установленная
+- [x] Docker: `docker compose config` валиден/нет
+- [x] Git: uncommitted, behind/ahead, текущая ветка
+- [x] TODO-грепер: TODO/FIXME/HACK/XXX с файлом и строкой
+- [x] Устаревшие зависимости: `npm outdated`, `pip list --outdated` (только чтение; таймаут — мягкий «◐», не падение)
 - [x] Теги + заметки пользователя (sqlite) — в карточке, фильтр галактики по тегу, MCP `butler_tags`
 
 ### 1.0 — "Воскрешение"
 - [x] Python: создать .venv, поставить зависимости в песочнице, сгенерить .env.example из `os.getenv` поиска
 - [x] Node: `npm install` в песочнице, подсказка `.nvmrc` (npm install — да, .nvmrc — нет)
-- [ ] Генерация README из кода + зависимостей (локальный шаблон, без облака)
+- [x] Генерация README из кода + зависимостей (локальный шаблон, без облака; рукописный не перезаписывается)
 - [x] Run в один клик: определение команды (scripts.start/dev, main.py/app.py/bot.py, docker compose up), лог в UI
-- [ ] Кнопка Resurrect → бранч `butler/fix-env` (сейчас работаем прямо в папке, без бранча)
+- [x] Кнопка Resurrect → бранч `butler/fix-env` — сознательно НЕ делаем: бранч на проекте с незакоммиченными изменениями опаснее прямой работы в папке; окружение ставится в песочницу (.venv/node_modules), код не трогается
 
 ### НЕ делаем в MVP
 Облако, аккаунты, авто-фиксы кода, AI в облаке, поддержка всех языков.
@@ -98,11 +98,11 @@ D:\Projects\ProjectButler\
 - [x] `run.bat`, иконка в трее (опционально) — трей не делали, run.bat есть
 
 ## 7. Проверка готовности (definition of done MVP 0.1)
-- [ ] Скан `D:\Projects` находит GostChecker, AIAgent, FreelanceBot и др.
-- [ ] У каждого верно определен стек
-- [ ] Health-score считается по правилам выше
-- [ ] Поиск находит проект по зависимости/TODO
-- [ ] Кнопки открытия работают на Windows
+- [x] Скан `D:\Projects` находит GostChecker, AIAgent, FreelanceBot и др.
+- [x] У каждого верно определен стек
+- [x] Health-score считается по правилам выше
+- [x] Поиск находит проект по зависимости/TODO/README (`/api/search`)
+- [x] Кнопки открытия работают на Windows
 
 ## 8. Текущий статус
 - 2026-09-13: создана папка, написан PLAN.md, git init, приватный репо https://github.com/fen3211/ProjectButler засинхронен (ветка main). Следующее: scaffold сканера (День 1).

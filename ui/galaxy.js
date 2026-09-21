@@ -1114,9 +1114,13 @@ async function runDoctor(star, btn) {
   if (out) out.innerHTML = '<div class="fact" style="border-bottom:0"><span>диагностика</span><span>идёт…</span></div>';
   try {
     const data = await api('/api/doctor', { path: star.node.path });
-    const rows = data.checks.map((c) =>
-      '<div class="doctorrow"><span>' + (c.ok ? '✓' : '✗') + ' ' + esc(c.check) + '</span>' +
-      '<span>' + esc(c.detail || '') + '</span></div>').join('');
+    const rows = data.checks.map((c) => {
+      const mark = c.ok === null ? '<span style="color:#ffd479">◐</span>'
+        : (c.ok ? '<span style="color:var(--good)">✓</span>'
+                : '<span style="color:var(--bad)">✗</span>');
+      return '<div class="doctorrow"><span>' + mark + ' ' + esc(c.check) + '</span>' +
+             '<span>' + esc(c.detail || '') + '</span></div>';
+    }).join('');
     if (out) out.innerHTML = '<div class="kick" style="margin-top:14px">диагностика</div>' + rows;
   } catch (err) {
     if (out) out.innerHTML = '<div class="warnbox">' + esc(err.message) + '</div>';
@@ -1213,6 +1217,7 @@ function renderPanel(star) {
     '<div class="abtn" id="resurrectBtn" title="окружение + зависимости + .env.example">Воскресить</div>' +
     '<div class="abtn" id="doctorBtn">Диагностика</div>' +
     (n.has_git ? '' : '<div class="abtn" id="gitBtn">Создать git</div>') +
+    (n.has_readme ? '' : '<div class="abtn" id="readmeBtn">Сгенерировать README</div>') +
     '<div class="abtn" data-copy="path">Копировать путь</div>' +
     '</div>' +
     '<div id="runBox"></div><div id="resBox"></div><div id="doctorOut"></div>';
@@ -1231,6 +1236,25 @@ function renderPanel(star) {
   if (doctorBtn) doctorBtn.onclick = () => runDoctor(star, doctorBtn);
   const gitBtn = ui.detail.querySelector('#gitBtn');
   if (gitBtn) gitBtn.onclick = () => gitInit(star, gitBtn);
+  const readmeBtn = ui.detail.querySelector('#readmeBtn');
+  if (readmeBtn) readmeBtn.onclick = async () => {
+    readmeBtn.classList.add('disabled');
+    try {
+      const res = await api('/api/readme', { path: n.path });
+      if (res.written) {
+        say('README.md сгенерирован — теперь своими словами');
+        await init(true);
+        const again = state.byName[star.node.name];
+        if (again) select(again);
+      } else {
+        say(res.reason || 'README не понадобился');
+        readmeBtn.classList.remove('disabled');
+      }
+    } catch (err) {
+      fail('README не сгенерировался: ' + err.message);
+      readmeBtn.classList.remove('disabled');
+    }
+  };
 
   renderTags(star, meta);
   wireNote(star);

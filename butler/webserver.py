@@ -13,7 +13,7 @@ from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
 from urllib.parse import parse_qs, urlsplit
 
-from . import config, resurrect as resurrect_mod, runner
+from . import config, resurrect as resurrect_mod, readme_gen, runner
 from .disk import JUNK_DIRS
 from .doctor import diagnose
 from .index import build_feed, read_feed, summarize, write_feed, node as galaxy_node
@@ -489,6 +489,16 @@ class ButlerHandler(BaseHTTPRequestHandler):
             if self.server.butler_runs.stop(target):
                 return self._json({"ok": True, "path": target, "stopped": True})
             return self._error(404, "Запущенного процесса этого проекта нет")
+        if path == "/api/readme":
+            target = str(args.get("path") or "")
+            if not _within(target, self.root):
+                return self._error(403, "Путь вне корня сканирования — отказ")
+            rec = self._rec_for(target)
+            if rec is None:
+                return self._error(404, "Проект не найден в базе — пересканируй")
+            plan = runner.detect_command(target, rec.get("stacks", []))
+            result = readme_gen.generate(target, rec, plan)
+            return self._json({"ok": True, "path": target, **result})
         return self._error(404, f"Нет такого маршрута: {path}")
 
     # ---------- чтение для API ----------
@@ -525,6 +535,11 @@ class ButlerHandler(BaseHTTPRequestHandler):
                         where = "README"
                 except OSError:
                     pass
+            if not where:
+                for t in (facts.get("todos") or []):
+                    if q in str(t.get("text", "")).lower():
+                        where = "TODO " + str(t.get("file", "")) + ":" + str(t.get("line", ""))
+                        break
             if where:
                 out.append({"name": name, "path": rec["path"], "where": where})
             if len(out) >= 20:
