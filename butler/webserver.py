@@ -4,6 +4,7 @@ import os
 import shutil
 import stat
 import string
+import time
 import subprocess
 import sys
 import threading
@@ -252,7 +253,7 @@ def _browse(path: str) -> dict:
 
 
 class ButlerHandler(BaseHTTPRequestHandler):
-    server_version = "ProjectButler/0.2"
+    server_version = "ProjectButler/1.0"
     protocol_version = "HTTP/1.1"
 
     def _send(self, code, body: bytes, ctype="application/json; charset=utf-8"):

@@ -1,9 +1,33 @@
 # Project Butler
 
+[![tests](https://img.shields.io/badge/tests-45%2F45-brightgreen)](#тесты)
+[![python](https://img.shields.io/badge/python-3.12-blue)](https://www.python.org/)
+[![deps](https://img.shields.io/badge/dependencies-zero-ff69b4)](#как-поставить)
+[![platform](https://img.shields.io/badge/platform-Windows-lightgrey)](#как-поставить)
+
+**Локальный дворецкий твоих проектов.** Сканит папку с проектами, считает здоровье (0–100),
+находит TODO и утёкшие секреты, воскрешает мёртвые окружения, публикует на GitHub
+и рисует всё это **галактикой** в браузере. Python 3.12, ноль зависимостей,
+всё локально — ничего не улетает в облако.
+
+![Галактика проектов](design/shots/readme-1-galaxy.png)
+
 Локальный пилот по папке с проектами. Видит все проекты, считает здоровье (0–100),
 находит TODO и чтение env в коде, отдаёт всё через CLI, MCP и «галактику проектов»
 в браузере. **Ноль зависимостей** — только стандартная библиотека Python 3.12.
 Всё локально, ничего в облако не отправляет. Windows-first.
+
+## Как это выглядит
+
+| Галактика | Карточка проекта |
+|---|---|
+| ![Галактика](design/shots/readme-1-galaxy.png) | ![Карточка](design/shots/readme-2-card.png) |
+| **Wrapped — отчёт миссии** | **Настройки: темы и язык** |
+| ![Wrapped](design/shots/readme-3-wrapped.png) | ![Настройки](design/shots/readme-4-settings.png) |
+
+Каждая звезда — проект: светлость = health-score, цвет = стек, чёрные дыры = мёртвые,
+янтарные рои = TODO. Кластеры по стекам, ринги тревоги вокруг заброшенных,
+пунктир между близнецами-дубликатами.
 
 ## Возможности
 
@@ -36,12 +60,17 @@
 | MCP-сервер | 14 инструментов для Claude / Cline по stdio (без SDK) |
 | sqlite-база | `~/.project-butler/butler.db`, миграции без потери данных |
 
-## Быстрый старт
+## Как поставить
 
 ```bat
-cd D:\Projects\ProjectButler
-run.bat                      :: скан D:\Projects + открыть галактику
+git clone https://github.com/fen3211/ProjectButler.git
+cd ProjectButler
+run.bat
 ```
+
+Всё. Нужен только Python 3.12 в PATH — `run.bat` сканирует `D:\Projects`
+(по умолчанию) и открывает галактику на [http://127.0.0.1:17373](http://127.0.0.1:17373).
+Другая папка — вбей путь в поле сверху или выбери диск через «обзор».
 
 или по шагам:
 

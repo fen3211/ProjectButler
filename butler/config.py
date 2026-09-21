@@ -32,8 +32,8 @@ def load_settings() -> dict:
 
 
 def save_settings(settings) -> dict:
-    """Пишет настройки (только известные ключи), возвращает сохранённое."""
-    out = dict(DEFAULT_SETTINGS)
+    """Пишет настройки поверх текущих (частичный POST не стирает остальное)."""
+    out = load_settings()
     out.update({k: v for k, v in (settings or {}).items()
                 if k in ("theme", "lang", "custom", "watch", "multi")})
     if out["theme"] not in ("darkmatter", "deepspace", "mars", "observatory", "custom"):

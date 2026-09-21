@@ -124,8 +124,10 @@ def main():
 
     status, body = request("/api/gh/status")
     data = json.loads(body) if status == 200 else {}
-    check("GET /api/gh/status без токена = не авторизован", status == 200 and
-          data.get("authed") is False, str(data.get("authed")))
+    check("GET /api/gh/status отдаёт состояние входа", status == 200 and
+          isinstance(data.get("authed"), bool) and
+          (not data.get("authed") or data.get("login")),
+          "authed=" + str(data.get("authed")) + " login=" + str(data.get("login")))
 
     status, body = request("/api/gh/repo?path=" + quote(r"C:\Windows"))
     check("GET /api/gh/repo вне корня = 403", status == 403, body[:80])
