@@ -29,11 +29,16 @@ const state = {
 
 /* палитры тем для канваса: пыль, туманности, акценты */
 const CANVAS_THEMES = {
-  darkmatter:  { dust: '#cfd8ff', warm: '157,140,255', cool: '110,231,255', accent: '#9d8cff', accent2: '#6ee7ff' },
-  deepspace:   { dust: '#bfd4ff', warm: '90,150,255',  cool: '70,225,205',  accent: '#6ea8ff', accent2: '#4de3d0' },
-  mars:        { dust: '#ffe0c8', warm: '255,150,90',  cool: '255,205,120', accent: '#ffab6e', accent2: '#ffd479' },
-  observatory: { dust: '#5a6480', warm: '120,100,220', cool: '20,140,165',  accent: '#6d4fd4', accent2: '#0e8fa8' },
+  darkmatter:  { dust: '#cfd8ff', warm: '157,140,255', cool: '110,231,255', accent: '#9d8cff', accent2: '#6ee7ff', ink: '242,244,255' },
+  deepspace:   { dust: '#bfd4ff', warm: '90,150,255',  cool: '70,225,205',  accent: '#6ea8ff', accent2: '#4de3d0', ink: '242,244,255' },
+  mars:        { dust: '#ffe0c8', warm: '255,150,90',  cool: '255,205,120', accent: '#ffab6e', accent2: '#ffd479', ink: '255,235,220' },
+  observatory: { dust: '#5a6480', warm: '120,100,220', cool: '20,140,165',  accent: '#6d4fd4', accent2: '#0e8fa8', ink: '28,34,51' },
 };
+
+function ink(a) {
+  const rgb = (state.palette && state.palette.ink) || '242,244,255';
+  return 'rgba(' + rgb + ',' + a + ')';
+}
 
 function hexToRgb(hex) {
   const m = /^#?([0-9a-f]{6})$/i.exec(String(hex || '').trim());
@@ -1191,7 +1196,7 @@ function drawStars(order) {
     }
 
     if (isHover) {
-      ctx.strokeStyle = 'rgba(242, 244, 255, .45)';
+      ctx.strokeStyle = ink(.45);
       ctx.lineWidth = 1;
       ctx.beginPath();
       ctx.arc(pr.x, pr.y, r + 6, 0, Math.PI * 2);
@@ -1218,7 +1223,7 @@ function drawStars(order) {
       // расходящиеся рипплы — «сигнал» от выбранной звезды
       for (let k = 0; k < 2; k++) {
         const t = ((now / 1500) + k * 0.5) % 1;
-        ctx.strokeStyle = 'rgba(200, 212, 255,' + ((1 - t) * 0.5).toFixed(3) + ')';
+        ctx.strokeStyle = 'rgba(' + ((state.palette && state.palette.ink) || '200,212,255') + ',' + ((1 - t) * 0.5).toFixed(3) + ')';
         ctx.lineWidth = 1.2;
         ctx.beginPath();
         ctx.arc(pr.x, pr.y, r + 7 + t * 30, 0, Math.PI * 2);
@@ -1227,18 +1232,18 @@ function drawStars(order) {
       // орбитальные спутники по псевдо-3D эллипсу — звезда «с системой»
       for (let i = 0; i < 3; i++) {
         const a = now / 950 + i * (Math.PI * 2 / 3);
-        ctx.fillStyle = 'rgba(226, 232, 255, .9)';
+        ctx.fillStyle = ink(.9);
         ctx.beginPath();
         ctx.arc(pr.x + Math.cos(a) * (r + 15), pr.y + Math.sin(a) * (r + 15) * 0.42, 1.5, 0, Math.PI * 2);
         ctx.fill();
       }
-      ctx.strokeStyle = 'rgba(255,255,255,.85)';
+      ctx.strokeStyle = ink(.85);
       ctx.lineWidth = 1.1;
       ctx.beginPath();
       ctx.arc(pr.x, pr.y, r + 7, 0, Math.PI * 2);
       ctx.stroke();
       ctx.save();
-      ctx.shadowColor = 'rgba(200,210,255,.9)';
+      ctx.shadowColor = ink(.9);
       ctx.shadowBlur = 8;
       ctx.beginPath();
       ctx.moveTo(pr.x - r * 5, pr.y); ctx.lineTo(pr.x + r * 5, pr.y);
@@ -1262,7 +1267,7 @@ function drawStars(order) {
     if (labelWorthy(star) && pr.s > 0.35) {
       const sel = star === state.selected || star === state.hover;
       ctx.font = (sel ? '450 ' : '300 ') + '11px "Segoe UI", sans-serif';
-      ctx.fillStyle = sel ? 'rgba(242,244,255,.9)' : 'rgba(242,244,255,.55)';
+      ctx.fillStyle = sel ? ink(.9) : ink(.55);
       ctx.textAlign = 'center';
       ctx.fillText(star.node.name + ' · ' + star.node.score, pr.x, pr.y - r - 9);
     }
@@ -1567,7 +1572,9 @@ function renderPanel(star) {
     accentColor() + ',' + star.status + ')"></i></div>' +
     '<div class="facts">' +
     fact(t('f_stack'), n.stacks.join(', ') || '—') +
-    fact(t('f_idle'), n.idle_days + ' ' + pluralDays(n.idle_days)) +
+    fact(t('f_idle'), state.lang === 'en'
+      ? n.idle_days + 'd'
+      : n.idle_days + ' ' + pluralDays(n.idle_days)) +
     fact(t('f_branch'), n.branch || '—') +
     fact(t('f_deps'), String(n.deps)) +
     fact(t('f_todos'), String(n.todos)) +
